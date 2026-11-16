@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -31,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,21 +41,22 @@ import androidx.compose.material3.Surface as M3Surface
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.playertwo1.bookconverter.data.Book
+import io.github.playertwo1.bookconverter.ui.languageLabel
+import io.github.playertwo1.bookconverter.ui.sizeLabel
 import io.github.playertwo1.bookconverter.ui.theme.Accent
 import io.github.playertwo1.bookconverter.ui.theme.Serif
 import io.github.playertwo1.bookconverter.ui.theme.Stroke
 import io.github.playertwo1.bookconverter.ui.theme.Surface
 import io.github.playertwo1.bookconverter.ui.theme.TextPrimary
 import io.github.playertwo1.bookconverter.ui.theme.TextSecondary
-import java.util.Locale
 
 @Composable
-fun LibraryScreen(vm: LibraryViewModel = viewModel()) {
+fun LibraryScreen(onOpenBook: (Long) -> Unit, vm: LibraryViewModel = viewModel()) {
     val books by vm.books.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val importing by vm.importing.collectAsStateWithLifecycle()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) vm.import(uri)
+        if (uri != null) vm.import(uri, onOpenBook)
     }
 
     LazyColumn(
@@ -96,7 +99,7 @@ fun LibraryScreen(vm: LibraryViewModel = viewModel()) {
                 )
                 Spacer(Modifier.height(12.dp))
             }
-            items(books, key = { it.id }) { book -> BookRow(book) }
+            items(books, key = { it.id }) { book -> BookRow(book, onOpenBook) }
         } else {
             item {
                 Spacer(Modifier.height(24.dp))
@@ -107,10 +110,15 @@ fun LibraryScreen(vm: LibraryViewModel = viewModel()) {
 }
 
 @Composable
-private fun BookRow(book: Book) {
-    val details = listOfNotNull(book.author, book.format, languageLabel(book.language)).joinToString(" · ")
+private fun BookRow(book: Book, onOpen: (Long) -> Unit) {
+    val details = listOfNotNull(book.author, book.format, sizeLabel(book.sizeBytes), languageLabel(book.language))
+        .joinToString(" · ")
     M3Surface(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClickLabel = "Ver verificação", role = Role.Button) { onOpen(book.id) },
         color = Surface,
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, Stroke),
@@ -131,15 +139,7 @@ private fun BookRow(book: Book) {
                 )
                 Text(details, color = TextSecondary, fontSize = 13.sp)
             }
+            Text("›", color = TextSecondary, fontSize = 20.sp, modifier = Modifier.padding(start = 8.dp))
         }
     }
-}
-
-// Shown in pt-BR, e.g. "en" -> "Inglês".
-private fun languageLabel(tag: String?): String? {
-    if (tag.isNullOrBlank()) return null
-    val pt = Locale.forLanguageTag("pt-BR")
-    val name = Locale.forLanguageTag(tag).getDisplayLanguage(pt)
-    if (name.isBlank()) return null
-    return name.replaceFirstChar { it.titlecase(pt) }
 }

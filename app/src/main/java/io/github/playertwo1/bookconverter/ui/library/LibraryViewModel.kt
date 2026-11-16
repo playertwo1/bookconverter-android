@@ -29,7 +29,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val _importing = MutableStateFlow(false)
     val importing: StateFlow<Boolean> = _importing.asStateFlow()
 
-    fun import(uri: Uri) {
+    fun import(uri: Uri, onImported: (Long) -> Unit) {
         viewModelScope.launch {
             _importing.value = true
             try {
@@ -46,6 +46,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     "“${result.book.title}” importado"
                 }
+                if (!result.alreadyInLibrary) onImported(result.book.id)
             } catch (e: EpubException) {
                 _message.value = e.message
             } catch (e: Exception) {

@@ -31,6 +31,9 @@ interface BookDao {
     @Query("SELECT * FROM Book ORDER BY importedAt DESC")
     fun all(): Flow<List<Book>>
 
+    @Query("SELECT * FROM Book WHERE id = :id")
+    suspend fun byId(id: Long): Book?
+
     @Query("SELECT * FROM Book WHERE sha256 = :sha256")
     suspend fun bySha(sha256: String): Book?
 

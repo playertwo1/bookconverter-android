@@ -1,5 +1,6 @@
 package io.github.playertwo1.bookconverter.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Surface as M3Surface
 import io.github.playertwo1.bookconverter.ui.library.LibraryScreen
+import io.github.playertwo1.bookconverter.ui.verify.VerificationScreen
 import io.github.playertwo1.bookconverter.ui.theme.AccentSoft
 import io.github.playertwo1.bookconverter.ui.theme.Background
 import io.github.playertwo1.bookconverter.ui.theme.Stroke
@@ -46,14 +48,21 @@ enum class Tab(val label: String) {
 @Composable
 fun AppScaffold() {
     var tab by rememberSaveable { mutableStateOf(Tab.Biblioteca) }
+    var openBookId by rememberSaveable { mutableStateOf<Long?>(null) }
     Box(Modifier.fillMaxSize().background(Background)) {
-        when (tab) {
-            Tab.Biblioteca -> LibraryScreen()
-            Tab.Series -> SeriesScreen()
-            Tab.Atividade -> ActivityScreen()
-            Tab.Ajustes -> SettingsScreen()
+        val verifying = openBookId
+        if (verifying != null) {
+            BackHandler { openBookId = null }
+            VerificationScreen(verifying, onBack = { openBookId = null })
+        } else {
+            when (tab) {
+                Tab.Biblioteca -> LibraryScreen(onOpenBook = { openBookId = it })
+                Tab.Series -> SeriesScreen()
+                Tab.Atividade -> ActivityScreen()
+                Tab.Ajustes -> SettingsScreen()
+            }
+            FloatingNav(selected = tab, onSelect = { tab = it }, modifier = Modifier.align(Alignment.BottomCenter))
         }
-        FloatingNav(selected = tab, onSelect = { tab = it }, modifier = Modifier.align(Alignment.BottomCenter))
     }
 }
 

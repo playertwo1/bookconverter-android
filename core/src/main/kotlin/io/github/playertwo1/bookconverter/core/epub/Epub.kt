@@ -22,27 +22,74 @@ data class Block(val spineIndex: Int, val index: Int, val html: String, val text
   val id: String get() = "$spineIndex:$index"
 }
 
+/** One table-of-contents link; [path] is the ZIP entry it points to, without the #fragment. */
+data class TocEntry(val title: String, val path: String)
+
+/** What the Verification screen shows; computed in one pass over the spine. */
+data class Verification(
+  /** OPF package version, e.g. "2.0" or "3.0". */
+  val version: String?,
+  val spineDocs: Int,
+  val tocEntries: Int,
+  /** TOC links whose target file is not in the ZIP. */
+  val tocBroken: Int,
+  val blocks: Int,
+  val chars: Long,
+  /** Share of the body text that falls inside blocks; low values mean text the chunker would skip. */
+  val coverage: Double,
+  val obfuscatedFonts: Boolean,
+) {
+  /** Non-fatal issues, in pt-BR. A book with no blocks never gets this far: the importer refuses it. */
+  val warnings: List<String>
+    get() = buildList {
+      if (coverage < MIN_COVERAGE) add("Parte do texto fica fora dos blocos (cobertura de ${"%.1f".format(coverage * 100)}%)")
+      if (tocEntries == 0) add("O livro não tem índice (nav ou NCX)")
+      if (tocBroken > 0) add("$tocBroken link(s) do índice apontam para arquivos ausentes")
+    }
+
+  companion object {
+    const val MIN_COVERAGE = 0.98
+  }
+}
+
 class Epub private constructor(
   /** Every ZIP entry, in original order, as raw bytes. */
   val entries: LinkedHashMap<String, ByteArray>,
   val title: String?,
   val author: String?,
   val language: String?,
+  val version: String?,
   /** Entry paths of the spine XHTML documents, in reading order. */
   val spine: List<String>,
+  val toc: List<TocEntry>,
+  val obfuscatedFonts: Boolean,
 ) {
+  /** Block IDs are stable: "spine:index" plus the text hash, derived only from the file's bytes. */
   fun blocks(): List<Block> = spine.indices.flatMap { i -> blocksOf(i, parse(spine[i])).map { it.first } }
 
-  /** Share of the body text that falls inside blocks; low values mean text the chunker would skip. */
-  fun coverage(): Double {
+  fun coverage(): Double = verify().coverage
+
+  fun verify(): Verification {
     var body = 0L
     var inBlocks = 0L
+    var count = 0
     spine.forEachIndexed { i, path ->
       val doc = parse(path)
       body += bodyOf(doc)?.text()?.length ?: 0
-      inBlocks += blocksOf(i, doc).sumOf { it.first.text.length }
+      val blocks = blocksOf(i, doc)
+      count += blocks.size
+      inBlocks += blocks.sumOf { it.first.text.length }
     }
-    return if (body == 0L) 1.0 else inBlocks.toDouble() / body
+    return Verification(
+      version = version,
+      spineDocs = spine.size,
+      tocEntries = toc.size,
+      tocBroken = toc.count { it.path !in entries },
+      blocks = count,
+      chars = inBlocks,
+      coverage = if (body == 0L) 1.0 else inBlocks.toDouble() / body,
+      obfuscatedFonts = obfuscatedFonts,
+    )
   }
 
   /**
@@ -96,9 +143,39 @@ class Epub private constructor(
         title = byLocal(opf, "title").firstOrNull()?.text(),
         author = byLocal(opf, "creator").firstOrNull()?.text(),
         language = byLocal(opf, "language").firstOrNull()?.text(),
+        version = byLocal(opf, "package").firstOrNull()?.attr("version")?.takeIf { it.isNotBlank() },
         spine = spine,
+        toc = navToc(entries, opfDir, manifest.values).ifEmpty { ncxToc(entries, opf, opfDir, manifest) },
+        obfuscatedFonts = "META-INF/encryption.xml" in entries, // checkDrm already let only font obfuscation through
       )
     }
+
+    /** EPUB 3: the manifest item with properties="nav", then its <nav epub:type="toc">. */
+    private fun navToc(entries: Map<String, ByteArray>, opfDir: String, items: Collection<Element>): List<TocEntry> {
+      val item = items.firstOrNull { "nav" in it.attr("properties").split(' ') } ?: return emptyList()
+      val navPath = resolve(opfDir, item.attr("href"))
+      val doc = xml(entries[navPath] ?: return emptyList())
+      val navs = byLocal(doc, "nav")
+      val toc = navs.firstOrNull { "toc" in it.attr("epub:type").split(' ') } ?: navs.firstOrNull() ?: return emptyList()
+      return byLocal(toc, "a").filter { it.hasAttr("href") }.map { a -> TocEntry(a.text(), target(navPath, a.attr("href"))) }
+    }
+
+    /** EPUB 2 (or EPUB 3 without nav): the NCX named by <spine toc="…">, else any NCX in the manifest. */
+    private fun ncxToc(entries: Map<String, ByteArray>, opf: Document, opfDir: String, manifest: Map<String, Element>): List<TocEntry> {
+      val item = byLocal(opf, "spine").firstOrNull()?.attr("toc")?.let { manifest[it] }
+        ?: manifest.values.firstOrNull { it.attr("media-type") == "application/x-dtbncx+xml" }
+        ?: return emptyList()
+      val ncxPath = resolve(opfDir, item.attr("href"))
+      val doc = xml(entries[ncxPath] ?: return emptyList())
+      return byLocal(doc, "navPoint").mapNotNull { point ->
+        val src = point.children().firstOrNull { it.tagName().substringAfter(':') == "content" }?.attr("src") ?: return@mapNotNull null
+        TocEntry(byLocal(point, "text").firstOrNull()?.text().orEmpty(), target(ncxPath, src))
+      }
+    }
+
+    /** A TOC href is relative to the file that holds it; "#frag" alone points back at that file. */
+    private fun target(fromPath: String, href: String): String =
+      if (href.startsWith("#")) fromPath else resolve(fromPath.substringBeforeLast('/', ""), href)
 
     private fun readZip(input: InputStream): LinkedHashMap<String, ByteArray> {
       val entries = LinkedHashMap<String, ByteArray>()
