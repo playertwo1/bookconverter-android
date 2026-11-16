@@ -82,6 +82,27 @@ Base: o pacote já fixa produto (EN→pt-BR, EPUB/MOBI/AZW3 sem DRM, OpenAI/Clau
 - Descartado da V1 (vai para depois): backup/restauração manual.
 - Difícil de reverter: não
 
+### D12 - Custo na prévia (2026-11-16, início do P1)
+- Pergunta: nenhuma das 3 APIs informa preço; de onde vem o custo estimado?
+- Decisão: só tokens. A prévia mostra os tokens reais da amostra e a estimativa de tokens de entrada e saída do livro inteiro (com margem e o rótulo "estimado"). O teto de orçamento é em tokens.
+- Por quê: escolha do usuário; nada para manter atualizado e nenhum valor errado sem aviso.
+- Descartado: preço digitado por modelo; tabela de preços embutida.
+- Difícil de reverter: não (dá para somar preço por modelo depois).
+
+### D13 - Tamanho do bloco enviado à IA (2026-11-16)
+- Pergunta: quanto texto vai em cada chamada?
+- Decisão: parágrafos seguidos do mesmo capítulo, até ~3.000 caracteres de HTML por chamada (um parágrafo maior que isso vai sozinho). Cada parágrafo leva um marcador numerado, e a resposta precisa devolver os mesmos marcadores na mesma ordem.
+- Por quê: ~400 chamadas no *The Devils* em vez de ~7.300; o prompt fixo pesa menos, e o modelo vê o contexto do trecho. Retraduzir refaz no máximo ~1 página.
+- Descartado: um parágrafo por chamada (caro e lento); ~8.000 caracteres (respostas longas falham mais).
+- Difícil de reverter: não, mas muda o checkpoint do P2.
+
+### D14 - Login com conta em vez de chave (2026-11-16)
+- Pergunta: dá para entrar com OAuth no ChatGPT/Codex e no Gemini, em vez de colar chave de API?
+- Decisão: ChatGPT sim, pelo programa oficial "Sign in with ChatGPT" para apps open-source e locais (registro dinâmico de cliente, PKCE, callback em 127.0.0.1); as chamadas usam a cota de Codex/trabalho do plano na Responses API (`store=false`, `stream=true`). O repositório será tornado público pelo usuário para se enquadrar como open-source. Gemini continua só com chave: o login da assinatura (o mesmo do Gemini CLI/Antigravity) exige se passar pelo cliente do Gemini CLI, viola os termos do Google e há banimentos ativos; o usuário pediu, e ficou de fora por isso.
+- Por quê: escolha do usuário para usar o plano que já paga; a OpenAI documenta e permite esse uso.
+- Descartado: reaproveitar o token do Codex CLI (não oficial); login da assinatura Gemini; OAuth oficial da API Gemini (cobra igual à chave e exige cliente no Cloud Console).
+- Difícil de reverter: não. A OpenAI marca o programa como preview; se mudar as regras, a chave de API continua funcionando.
+
 ### Assumido (do pacote, sem nova pergunta)
 - EN → pt-BR fixo; DRM recusado, sem contorno.
 - Tema AMOLED índigo (tokens do pacote) desde o primeiro build, porque o pacote o trata como P0. Polimento visual e animações só depois do fluxo real.

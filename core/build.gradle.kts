@@ -11,6 +11,7 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.anthropic.java)
   testImplementation(libs.junit)
+  testImplementation(libs.okhttp.mockwebserver)
 }
 
 tasks.test {

@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Surface as M3Surface
 import io.github.playertwo1.bookconverter.ui.library.LibraryScreen
+import io.github.playertwo1.bookconverter.ui.settings.ProvidersScreen
+import io.github.playertwo1.bookconverter.ui.translate.NewTranslationScreen
 import io.github.playertwo1.bookconverter.ui.verify.VerificationScreen
 import io.github.playertwo1.bookconverter.ui.theme.AccentSoft
 import io.github.playertwo1.bookconverter.ui.theme.Background
@@ -49,19 +51,42 @@ enum class Tab(val label: String) {
 fun AppScaffold() {
     var tab by rememberSaveable { mutableStateOf(Tab.Biblioteca) }
     var openBookId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var translateBookId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showProviders by rememberSaveable { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(Background)) {
         val verifying = openBookId
-        if (verifying != null) {
-            BackHandler { openBookId = null }
-            VerificationScreen(verifying, onBack = { openBookId = null })
-        } else {
-            when (tab) {
-                Tab.Biblioteca -> LibraryScreen(onOpenBook = { openBookId = it })
-                Tab.Series -> SeriesScreen()
-                Tab.Atividade -> ActivityScreen()
-                Tab.Ajustes -> SettingsScreen()
+        val translating = translateBookId
+        when {
+            showProviders -> {
+                BackHandler { showProviders = false }
+                ProvidersScreen(onBack = { showProviders = false })
             }
-            FloatingNav(selected = tab, onSelect = { tab = it }, modifier = Modifier.align(Alignment.BottomCenter))
+            translating != null -> {
+                BackHandler { translateBookId = null }
+                NewTranslationScreen(
+                    translating,
+                    onBack = { translateBookId = null },
+                    onOpenProviders = { showProviders = true },
+                )
+            }
+            verifying != null -> {
+                // Back from the translation returns here, since openBookId is kept.
+                BackHandler { openBookId = null }
+                VerificationScreen(
+                    verifying,
+                    onBack = { openBookId = null },
+                    onStartTranslation = { translateBookId = it },
+                )
+            }
+            else -> {
+                when (tab) {
+                    Tab.Biblioteca -> LibraryScreen(onOpenBook = { openBookId = it })
+                    Tab.Series -> SeriesScreen()
+                    Tab.Atividade -> ActivityScreen()
+                    Tab.Ajustes -> SettingsScreen(onOpenProviders = { showProviders = true })
+                }
+                FloatingNav(selected = tab, onSelect = { tab = it }, modifier = Modifier.align(Alignment.BottomCenter))
+            }
         }
     }
 }

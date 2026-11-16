@@ -22,6 +22,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.Surface as M3Surface
@@ -57,7 +59,7 @@ import io.github.playertwo1.bookconverter.ui.theme.TextPrimary
 import io.github.playertwo1.bookconverter.ui.theme.TextSecondary
 
 @Composable
-fun VerificationScreen(bookId: Long, onBack: () -> Unit) {
+fun VerificationScreen(bookId: Long, onBack: () -> Unit, onStartTranslation: (Long) -> Unit) {
     val app = LocalContext.current.applicationContext as Application
     val vm: VerificationViewModel = viewModel(key = "verify-$bookId") { VerificationViewModel(app, bookId) }
     val state by vm.state.collectAsStateWithLifecycle()
@@ -93,13 +95,13 @@ fun VerificationScreen(bookId: Long, onBack: () -> Unit) {
                 Text("Verificando…", color = TextSecondary)
             }
             is VerifyState.Failed -> Text(s.message, color = Danger, modifier = Modifier.padding(top = 24.dp))
-            is VerifyState.Ready -> ReadyContent(s.book, s.v)
+            is VerifyState.Ready -> ReadyContent(s.book, s.v, onStartTranslation)
         }
     }
 }
 
 @Composable
-private fun ReadyContent(book: Book, v: Verification) {
+private fun ReadyContent(book: Book, v: Verification, onStartTranslation: (Long) -> Unit) {
     Spacer(Modifier.height(16.dp))
     Card {
         Box(Modifier.size(8.dp).clip(CircleShape).background(Accent))
@@ -151,12 +153,15 @@ private fun ReadyContent(book: Book, v: Verification) {
         title = "Direitos de acesso",
         detail = if (v.obfuscatedFonts) "Sem DRM · fontes ofuscadas (permitido)" else "Sem DRM detectado",
     )
-    Text(
-        "A escolha de modelo e a tradução chegam na fase P1.",
-        color = TextSecondary,
-        fontSize = 13.sp,
-        modifier = Modifier.padding(top = 16.dp),
-    )
+    Button(
+        onClick = { onStartTranslation(book.id) },
+        modifier = Modifier.padding(top = 16.dp).fillMaxWidth().height(56.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = TextPrimary),
+    ) {
+        Text("Nova tradução", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+    }
+    Spacer(Modifier.height(24.dp))
 }
 
 @Composable
