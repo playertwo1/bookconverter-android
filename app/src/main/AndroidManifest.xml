@@ -1,14 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
-
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
-        android:label="BC Spike"
-        android:theme="@android:style/Theme.Material.NoActionBar">
+        android:label="Bookconverter"
+        android:theme="@style/Theme.Bookconverter">
 
         <activity
             android:name=".MainActivity"
@@ -18,12 +13,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Declare the dataSync FGS type on WorkManager's service, which setForeground() needs on API 34+. -->
-        <service
-            android:name="androidx.work.impl.foreground.SystemForegroundService"
-            android:foregroundServiceType="dataSync"
-            tools:node="merge" />
     </application>
 
 </manifest>

@@ -3,6 +3,7 @@
 Tradutor literário EN → pt-BR para Android, irmão do [bookconverter](https://github.com/playertwo1/bookconverter) desktop. Uso pessoal, em Kotlin nativo.
 
 - Especificação de produto, design e testes: [`docs/spec/`](docs/spec/README_COMECE_AQUI.md)
+- Índice e precedência entre os documentos: [`docs/README.md`](docs/README.md)
 - Decisões tomadas em cima do pacote: [`docs/DECISOES.md`](docs/DECISOES.md)
 - Roadmap: [`ROADMAP.md`](ROADMAP.md)
 

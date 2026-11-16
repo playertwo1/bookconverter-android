@@ -26,6 +26,7 @@ class Epub private constructor(
   /** Every ZIP entry, in original order, as raw bytes. */
   val entries: LinkedHashMap<String, ByteArray>,
   val title: String?,
+  val author: String?,
   val language: String?,
   /** Entry paths of the spine XHTML documents, in reading order. */
   val spine: List<String>,
@@ -93,6 +94,7 @@ class Epub private constructor(
       return Epub(
         entries,
         title = byLocal(opf, "title").firstOrNull()?.text(),
+        author = byLocal(opf, "creator").firstOrNull()?.text(),
         language = byLocal(opf, "language").firstOrNull()?.text(),
         spine = spine,
       )

@@ -1,20 +1,21 @@
-// Throwaway spike: does a long WorkManager job survive on a real phone?
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.ksp)
+  alias(libs.plugins.androidx.room)
 }
 
 android {
-  namespace = "io.github.playertwo1.bookconverter.spike"
+  namespace = "io.github.playertwo1.bookconverter"
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "io.github.playertwo1.bookconverter.spike"
+    applicationId = "io.github.playertwo1.bookconverter"
     minSdk = 34
     targetSdk = 36
     versionCode = 1
-    versionName = "0.1"
+    versionName = "0.1.0"
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   buildFeatures { compose = true }
@@ -25,15 +26,26 @@ android {
   }
 }
 
+// Schema JSON per database version, committed so MigrationTest can compare against it.
+room { schemaDirectory("$projectDir/schemas") }
+
 dependencies {
+  implementation(project(":core"))
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.compose.ui)
   implementation(libs.androidx.compose.material3)
-  implementation(libs.androidx.work.runtime.ktx)
+  implementation(libs.androidx.lifecycle.viewmodel.compose)
+  implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.room.runtime)
   implementation(libs.androidx.room.ktx)
   implementation(libs.kotlinx.coroutines.core)
   ksp(libs.androidx.room.compiler)
+
+  testImplementation(libs.junit)
+
+  androidTestImplementation(libs.androidx.room.testing)
+  androidTestImplementation(libs.androidx.test.ext.junit)
+  androidTestImplementation(libs.androidx.test.runner)
 }

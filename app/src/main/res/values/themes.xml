@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Bookconverter" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#000000</item>
+        <!-- Android 12+ draws its own splash; without this it flashes white before the AMOLED UI. -->
+        <item name="android:windowSplashScreenBackground">#000000</item>
+    </style>
+</resources>

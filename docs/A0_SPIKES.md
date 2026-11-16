@@ -1,12 +1,14 @@
 # A0: relatório dos spikes técnicos
 
-Atualizado em 2026-11-15. Regra do pacote: sem evidência, o status é NOT_RUN, nunca PASS.
+Atualizado em 2026-11-16. Regra do pacote: sem evidência, o status é NOT_RUN, nunca PASS.
 
 | Spike | Pergunta | Status |
 |---|---|---|
 | 1. EPUB em Kotlin | Dá para ler e regravar EPUB real sem perder estrutura? | **PASS (PC/JVM)** |
-| 2. Segundo plano | Um job de 2h sobrevive a tela apagada, morte do processo e reboot no S25? | Emulador: **PASS** (kill, pausa, cold boot) · **S25: NOT_RUN** |
+| 2. Segundo plano | Um job de 2h sobrevive a tela apagada, morte do processo e reboot no S25? | Emulador: **PASS** (kill, pausa, cold boot) · **S25: PASS no job contínuo de 2h**; interrupções e reboot **NOT_RUN** |
 | 3. Provedores | OpenAI, Anthropic e Gemini respondem, listam modelos e aceitam esforço? | **NOT_RUN** (faltam chaves) |
+
+**A0 encerrado por decisão do usuário (2026-11-16)**, com duas pendências que não bloqueiam o A1: o reboot e as interrupções no S25 (refazer antes do P2, que depende deles) e o spike 3 com chaves reais (refazer antes do P1). O app do spike saiu do `app/` no A1; o código fica no commit `82dc1e6`.
 
 ## Spike 1: EPUB (PASS)
 
@@ -60,7 +62,12 @@ App de teste: `app/` (pacote `io.github.playertwo1.bookconverter.spike`). Um `Co
 - **Corrigido depois do teste:** o texto da tela saía preto sobre fundo preto; e tocar "Iniciar novo" duas vezes zerava os blocos com o worker ainda rodando (agora o job é cancelado antes).
 - **O emulador não responde:** o limite de 6h/24h do `dataSync`, o efeito da economia de bateria da Samsung, a remoção do app dos recentes e o reboot real. Isso só no S25.
 
-### Protocolo no S25 Ultra (NOT_RUN)
+### S25 Ultra, 1ª rodada (2026-11-16, PASS parcial)
+Aparelho SM-S938B, Android 17 (build `CP2A.260605.016.S938BXXSDDZJ1`). Evidência: `spike.db` puxado do aparelho via `adb exec-out run-as … cat databases/spike.db*` às 04:50 e lido com sqlite.
+- **Job contínuo de 2h: PASS.** `START attempt=0` + `FGS_OK` às 00:18:18; 360/360 blocos COMPLETED entre 00:18:38 e 02:18:21; `DONE` às 02:18:21. Nenhum intervalo maior que 60 s entre blocos, nenhum `FGS_FAIL`, nenhum `STOP`. Ou seja, a economia de bateria da Samsung não pausou nem matou o serviço `dataSync` em 2h.
+- **Interrupções e reboot: NOT_RUN.** Só houve uma tentativa (`attempt=0`) e nenhum `STOP`, então nenhuma interrupção chegou a parar o worker. O `uptime` do aparelho era de 2 dias e 8 h, portanto não houve reboot durante o teste. O critério "START novo depois do reboot sem abrir o app" continua sem evidência.
+
+### Protocolo no S25 Ultra
 1. Instalar: `adb install -r app/build/outputs/apk/debug/app-debug.apk` (ou copiar o APK para o celular).
 2. Abrir, permitir notificações, tocar **Iniciar novo**.
 3. Apagar a tela e usar o celular normalmente por 2h. No meio: abrir outros apps pesados; deslizar o app para fora dos recentes; ativar a economia de bateria por 15 min; ficar 15 min sem rede (modo avião), o que vale como teste de resiliência, já que o job falso não usa rede.
