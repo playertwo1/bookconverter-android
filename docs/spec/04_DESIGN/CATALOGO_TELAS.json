@@ -1,0 +1,140 @@
+[
+  {
+    "id": "01_Boas_vindas",
+    "nome": "Boas-vindas",
+    "arquivo": "screens/01_Boas_vindas.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "02_Biblioteca",
+    "nome": "Biblioteca",
+    "arquivo": "screens/02_Biblioteca.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "03_Importar",
+    "nome": "Importar livro",
+    "arquivo": "screens/03_Importar.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "04_Verificacao",
+    "nome": "Verificação de arquivo",
+    "arquivo": "screens/04_Verificacao.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "05_Nova_traducao",
+    "nome": "Nova tradução",
+    "arquivo": "screens/05_Nova_traducao.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "06_Regras_traducao",
+    "nome": "Preferências de tradução",
+    "arquivo": "screens/06_Regras_traducao.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "07_Series",
+    "nome": "Séries",
+    "arquivo": "screens/07_Series.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "08_Memoria_serie",
+    "nome": "Memória da série",
+    "arquivo": "screens/08_Memoria_serie.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "09_Glossario",
+    "nome": "Glossário da série",
+    "arquivo": "screens/09_Glossario.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "10_Personagens",
+    "nome": "Personagens e mundo",
+    "arquivo": "screens/10_Personagens.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "11_Pares_traducao",
+    "nome": "Pares de tradução",
+    "arquivo": "screens/11_Pares_traducao.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "12_Fila",
+    "nome": "Fila de traduções",
+    "arquivo": "screens/12_Fila.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "13_Progresso",
+    "nome": "Tradução em andamento",
+    "arquivo": "screens/13_Progresso.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "14_Segundo_plano",
+    "nome": "Segundo plano e notificação",
+    "arquivo": "screens/14_Segundo_plano.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "15_Retomar",
+    "nome": "Pausa e retomada",
+    "arquivo": "screens/15_Retomar.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "16_Revisao_bilingue",
+    "nome": "Revisão bilíngue",
+    "arquivo": "screens/16_Revisao_bilingue.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "17_Pendencias",
+    "nome": "Pendências de consistência",
+    "arquivo": "screens/17_Pendencias.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "18_Exportar",
+    "nome": "Exportação",
+    "arquivo": "screens/18_Exportar.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "19_Concluidos",
+    "nome": "Livros concluídos",
+    "arquivo": "screens/19_Concluidos.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "20_Ajustes",
+    "nome": "Ajustes",
+    "arquivo": "screens/20_Ajustes.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "21_Provedores",
+    "nome": "Provedores e modelos",
+    "arquivo": "screens/21_Provedores.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "22_Recuperacao",
+    "nome": "Recuperação de erro",
+    "arquivo": "screens/22_Recuperacao.png",
+    "status": "Referência conceitual; não implementado"
+  },
+  {
+    "id": "23_Backup",
+    "nome": "Backup e armazenamento",
+    "arquivo": "screens/23_Backup.png",
+    "status": "Referência conceitual; não implementado"
+  }
+]

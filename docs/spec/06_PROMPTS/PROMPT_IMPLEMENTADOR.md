@@ -1,0 +1,3 @@
+# Prompt para implementar fase individual (Antigravity / Claude Code / Codex)
+Leia o pacote na ordem do AGENTS.md. Execute exclusivamente a Fase [ID] e suas subfases READY do ROADMAP.md. Primeiro faça inventário de código já existente e proponha plano curto com arquivos que mudará e testes. Não migre o Windows por impulso. Pare se houver bloqueador de formato, DRM, API ou background e mostre prova objetiva.
+Use Jetpack Compose e os tokens do DESIGN.md. Preserve o escopo do PRODUCT.md. Ao terminar, forneça tabela: requisito, implementação, teste executado, evidência, PASS/FAIL/NOT_RUN. Nunca reporte PASS a partir de design, código não executado ou teste sintético que exige telefone.

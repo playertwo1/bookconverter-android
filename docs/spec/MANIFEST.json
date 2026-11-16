@@ -1,0 +1,267 @@
+{
+  "name": "Bookconverter Android - pacote de produto e UX",
+  "date": "2026-11-15",
+  "status": "documentação / referências; nenhum aplicativo Android implementado",
+  "files": [
+    {
+      "path": "00_BRIEF/REQUISITOS_USUARIO_E_DECISOES.md",
+      "size_bytes": 4316,
+      "sha256": "0366be1d6e683db5cca7a694802570be40fcbd2d607bb19075b1a3d76f655286"
+    },
+    {
+      "path": "01_DOCUMENTOS/Bookconverter_Android_Manual_Produto_MVP.docx",
+      "size_bytes": 1922325,
+      "sha256": "d112dfe79469313ee4c83a5fa355535d94939b8b39a731e4443b2183b78b66b5"
+    },
+    {
+      "path": "02_ESPECIFICACOES/ARCHITECTURE.md",
+      "size_bytes": 4474,
+      "sha256": "72d90563cc900aee41f043e88a16265b27ac415f4665454aa282bd3546214f0c"
+    },
+    {
+      "path": "02_ESPECIFICACOES/DATA_MODEL.md",
+      "size_bytes": 2377,
+      "sha256": "7dbdcc8524727bc6e5bcdfa999baef00bc22440b7a6bd2225e79a8a3eb126692"
+    },
+    {
+      "path": "02_ESPECIFICACOES/DESIGN.md",
+      "size_bytes": 3638,
+      "sha256": "ac7d4f8c0cf6a9398a0351f321d8a8779e37873524c963753e70eb12ed45a514"
+    },
+    {
+      "path": "02_ESPECIFICACOES/FLOWS.md",
+      "size_bytes": 2241,
+      "sha256": "0494cc25f8a074957974fc614e4e380759099b1fbcdf5f29d514c5bc43b20107"
+    },
+    {
+      "path": "02_ESPECIFICACOES/MVP_DETALHADO.md",
+      "size_bytes": 4990,
+      "sha256": "b51e7190658bf037a5107a8fce6b199dbd83a9022cd5f13e83bef7a6808f2fe9"
+    },
+    {
+      "path": "02_ESPECIFICACOES/PRIVACIDADE_E_RISCOS.md",
+      "size_bytes": 1688,
+      "sha256": "7b9878231db225f68580fa69cf33e61c6ee5933307c108585c2c4cd368eee862"
+    },
+    {
+      "path": "02_ESPECIFICACOES/PRODUCT.md",
+      "size_bytes": 4764,
+      "sha256": "b55744fd6532fe4da704f27810e6681fcf2d19564d19930f2ff38ab10ccd69ca"
+    },
+    {
+      "path": "03_ROADMAP/ROADMAP.md",
+      "size_bytes": 4992,
+      "sha256": "aebb49c1c160c625ee7a3218d1c99db6452cc7554802a4ae63424d5297409ff1"
+    },
+    {
+      "path": "04_DESIGN/CATALOGO_TELAS.json",
+      "size_bytes": 3965,
+      "sha256": "8bb9106b54d35faab1e86d27beb79da744e89542343b343a18f80fc6c7f3a71f"
+    },
+    {
+      "path": "04_DESIGN/TOKENS.json",
+      "size_bytes": 1072,
+      "sha256": "ab2dfa27a9d5f1d99d0a6d3bb4573c86f288a3a335499f29e6b519bae8f73f20"
+    },
+    {
+      "path": "04_DESIGN/boards/Prancha_01.png",
+      "size_bytes": 495471,
+      "sha256": "d280ff3cd5f6c8c7808d412189d09fd4c2bf3f5a719d2049b4bdbc96537886ee"
+    },
+    {
+      "path": "04_DESIGN/boards/Prancha_02.png",
+      "size_bytes": 536663,
+      "sha256": "c26bd17b465ebf4646e64eb04bb9f76c7565dc6993f6f1d02c7d72ae252aa4ea"
+    },
+    {
+      "path": "04_DESIGN/boards/Prancha_03.png",
+      "size_bytes": 474768,
+      "sha256": "e4ac732e14bd0633f64fbda4f8d317fd846be50d4a672af4e828f816ae6501f7"
+    },
+    {
+      "path": "04_DESIGN/boards/Prancha_04.png",
+      "size_bytes": 455997,
+      "sha256": "df2e73b73d70477f47079bb71b9bc78978a5b2544c03f31b26353dc90cd2e108"
+    },
+    {
+      "path": "04_DESIGN/referencias_aprovadas/Conceito_Biblioteca_Leitura_Bilingue.png",
+      "size_bytes": 1542318,
+      "sha256": "5515642503e0eb46c91b74bb2cac22a787505ca14ce24fe6b82be47b24f1f9c8"
+    },
+    {
+      "path": "04_DESIGN/referencias_aprovadas/Conceito_Config_Memoria.png",
+      "size_bytes": 1562232,
+      "sha256": "a51dc9d0ebdcc08d8cf6e65b5cea9c53153f85cca47a25f4c6fa9913ced2c6c7"
+    },
+    {
+      "path": "04_DESIGN/referencias_aprovadas/Conceito_Indigo_Fluxo_4_Telas.png",
+      "size_bytes": 1651121,
+      "sha256": "a60c9065adcaecd8f166992fe89d75e5d06a4d57700639b8b00ed921a00761ed"
+    },
+    {
+      "path": "04_DESIGN/referencias_aprovadas/Conceito_Indigo_Prancha_Expandida.png",
+      "size_bytes": 1975158,
+      "sha256": "b6d1b9a85fb36aeb8c96da0f8fc9dae1bc2d0d423833b6351656fe0565f703a7"
+    },
+    {
+      "path": "04_DESIGN/referencias_aprovadas/Conceito_Progresso_Revisao.png",
+      "size_bytes": 1625949,
+      "sha256": "ee55055a0b68c6ba4f630aec9ab7cf2520917ddd51e8df75e333cf50170ee63b"
+    },
+    {
+      "path": "04_DESIGN/referencias_aprovadas/LEIA_ME.md",
+      "size_bytes": 600,
+      "sha256": "a73b9a9945a3275e14dafa1d952bf004f978516c926f0439273a69f8ed534794"
+    },
+    {
+      "path": "04_DESIGN/referencias_aprovadas/Referencia_visual_usuario.jpg",
+      "size_bytes": 148864,
+      "sha256": "b5bf81e9838ec828e1016cc464f2706d1e189a1c52281bc6131133e7fbcf70ca"
+    },
+    {
+      "path": "04_DESIGN/screens/01_Boas_vindas.png",
+      "size_bytes": 54201,
+      "sha256": "faa8e0f6f26a06fe9360da59a566fbc4dcf3fedf9bf61307aa30b2b336d5e0a7"
+    },
+    {
+      "path": "04_DESIGN/screens/02_Biblioteca.png",
+      "size_bytes": 90101,
+      "sha256": "b9ab695b788dd70a4739824a44db5ec782a2194d70c85c3fdc3d706553646a59"
+    },
+    {
+      "path": "04_DESIGN/screens/03_Importar.png",
+      "size_bytes": 53916,
+      "sha256": "992ed01eca367fa5678283024a46307c61c66cf5cfb32bd9e11898dea761591d"
+    },
+    {
+      "path": "04_DESIGN/screens/04_Verificacao.png",
+      "size_bytes": 66992,
+      "sha256": "6d2e16c06c26127942486cb00517ee1e6ea6ddb21a3e62034b393c6e0951a1f8"
+    },
+    {
+      "path": "04_DESIGN/screens/05_Nova_traducao.png",
+      "size_bytes": 69698,
+      "sha256": "611c1cdd0be9adc10486278f68e36d3172c4f72feb5231b79187a00c5b30a7f0"
+    },
+    {
+      "path": "04_DESIGN/screens/06_Regras_traducao.png",
+      "size_bytes": 64641,
+      "sha256": "ff711361fc6ba89375bd8dc45270d7cafce94d2b68d7a8fbce28230b6b72e5a0"
+    },
+    {
+      "path": "04_DESIGN/screens/07_Series.png",
+      "size_bytes": 76931,
+      "sha256": "4ba1c45dc8e9237b1cd096d493d2a43463a7fb4ca48a67ae9d9b6cc041da4ed5"
+    },
+    {
+      "path": "04_DESIGN/screens/08_Memoria_serie.png",
+      "size_bytes": 78944,
+      "sha256": "745048c2e8b868737461269da7e0ab23555eaea2c9d71b4d4e5bcc7b2246a779"
+    },
+    {
+      "path": "04_DESIGN/screens/09_Glossario.png",
+      "size_bytes": 70161,
+      "sha256": "aac43d4c9f6e3ac30e0fbfdb74813498882f9f6c8f64fa13c6aa7c1e247ba735"
+    },
+    {
+      "path": "04_DESIGN/screens/10_Personagens.png",
+      "size_bytes": 58619,
+      "sha256": "a1b18a81ead44141a3bf0c6b639214a656b25af8f41553222e14f1e3d4d432de"
+    },
+    {
+      "path": "04_DESIGN/screens/11_Pares_traducao.png",
+      "size_bytes": 76946,
+      "sha256": "9aff2042942dc37937cab715dee2b831bfde54a41d03fdb0b514dac3b13893b8"
+    },
+    {
+      "path": "04_DESIGN/screens/12_Fila.png",
+      "size_bytes": 71081,
+      "sha256": "a232b0fc5df638b8de10bb74954b5db42de901665ee6fc06cc583ccdcabe0a53"
+    },
+    {
+      "path": "04_DESIGN/screens/13_Progresso.png",
+      "size_bytes": 76335,
+      "sha256": "618f3337517b38e7ead86b148e83474d5773d5d84f72bef2a8153e2d3c1aa109"
+    },
+    {
+      "path": "04_DESIGN/screens/14_Segundo_plano.png",
+      "size_bytes": 68153,
+      "sha256": "ce40bd3e089bc096efc0f04cc8716fbefb927275a1f69333b88086dcc5aa7412"
+    },
+    {
+      "path": "04_DESIGN/screens/15_Retomar.png",
+      "size_bytes": 57367,
+      "sha256": "5d3199b773db6022e8d0303b72d0900aafe6ebc70c7e70875f678f80c65432be"
+    },
+    {
+      "path": "04_DESIGN/screens/16_Revisao_bilingue.png",
+      "size_bytes": 61151,
+      "sha256": "c47f269ccb9a4d72b684bdb4909e061c9689849ce574801cba6f30ed80f11d18"
+    },
+    {
+      "path": "04_DESIGN/screens/17_Pendencias.png",
+      "size_bytes": 70497,
+      "sha256": "f70d39629fa11a6c1a40a99150acde0a46efd3ec241dbdaa3a4f8c2aa17c0509"
+    },
+    {
+      "path": "04_DESIGN/screens/18_Exportar.png",
+      "size_bytes": 55045,
+      "sha256": "82d5a9700b8b278565dafacd070ffb9f9d79f82bf37700f2224a2988d9ffbbce"
+    },
+    {
+      "path": "04_DESIGN/screens/19_Concluidos.png",
+      "size_bytes": 75070,
+      "sha256": "3f971d7430f8bda2b813b99d23de22b00bed417433e13829e32a9ebfd04bb764"
+    },
+    {
+      "path": "04_DESIGN/screens/20_Ajustes.png",
+      "size_bytes": 80040,
+      "sha256": "141241dcbc7be4d972996af0af2243c7ee57ff00c03ca1ec4691a3b610a5370d"
+    },
+    {
+      "path": "04_DESIGN/screens/21_Provedores.png",
+      "size_bytes": 62465,
+      "sha256": "fe250bbe877d56378d2578c1807336078d14110419576bf2aab6807677bdf98d"
+    },
+    {
+      "path": "04_DESIGN/screens/22_Recuperacao.png",
+      "size_bytes": 65139,
+      "sha256": "4e9d150a5561a89df8334f1df5a94fabac13bae51291eca23cdf829b25b15718"
+    },
+    {
+      "path": "04_DESIGN/screens/23_Backup.png",
+      "size_bytes": 75716,
+      "sha256": "67c93d3a678fe665532711cd1602c5ccef9ddf830f20e5c6dcfc3170118df126"
+    },
+    {
+      "path": "05_CRITERIOS_DE_ACEITE/PLANO_DE_TESTES.md",
+      "size_bytes": 2486,
+      "sha256": "5631776fb9f89db55cd543a678e49289e3098f910722e8c5159ad84d802f80cc"
+    },
+    {
+      "path": "06_PROMPTS/AGENTS.md",
+      "size_bytes": 1814,
+      "sha256": "05e9e496582f27bf546253a646de172117dd5ca0b76e239296dd895872529ee7"
+    },
+    {
+      "path": "06_PROMPTS/PROMPT_AUDITOR.md",
+      "size_bytes": 518,
+      "sha256": "65722a2275cee4c20a6cc9c3dba601d42cdb71d657a89d8133a24d36ed0de0dc"
+    },
+    {
+      "path": "06_PROMPTS/PROMPT_IMPLEMENTADOR.md",
+      "size_bytes": 704,
+      "sha256": "02a79adc80e9805f2f8e3d219f53ff28991931db18da759130aebe6f1eeb4da5"
+    },
+    {
+      "path": "07_REFERENCIAS/FONTES_E_NOTAS.md",
+      "size_bytes": 2081,
+      "sha256": "8dde642562faaf9aab24109569c1967fd3151abcece7d24352921997ff5f48e1"
+    },
+    {
+      "path": "README_COMECE_AQUI.md",
+      "size_bytes": 1900,
+      "sha256": "433adb4243c849e676927c873c8bcfe73f3a3dd2b0002ca601df9edba078f07e"
+    }
+  ]
+}
