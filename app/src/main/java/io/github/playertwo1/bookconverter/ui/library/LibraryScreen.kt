@@ -31,7 +31,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,6 +40,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.playertwo1.bookconverter.data.Book
 import io.github.playertwo1.bookconverter.ui.theme.Accent
+import io.github.playertwo1.bookconverter.ui.theme.Serif
 import io.github.playertwo1.bookconverter.ui.theme.Stroke
 import io.github.playertwo1.bookconverter.ui.theme.Surface
 import io.github.playertwo1.bookconverter.ui.theme.TextPrimary
@@ -90,7 +90,7 @@ fun LibraryScreen(vm: LibraryViewModel = viewModel()) {
                 Text(
                     "Livros",
                     color = TextPrimary,
-                    fontFamily = FontFamily.Serif,
+                    fontFamily = Serif,
                     fontWeight = FontWeight.Bold,
                     fontSize = 24.sp,
                 )
