@@ -41,12 +41,15 @@ dependencies {
   implementation(libs.androidx.lifecycle.process)
   implementation(libs.androidx.room.runtime)
   implementation(libs.androidx.room.ktx)
+  implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.kotlinx.coroutines.core)
   ksp(libs.androidx.room.compiler)
 
   testImplementation(libs.junit)
+  testImplementation(libs.androidx.work.testing)
 
   androidTestImplementation(libs.androidx.room.testing)
+  androidTestImplementation(libs.androidx.work.testing)
   androidTestImplementation(libs.androidx.test.ext.junit)
   androidTestImplementation(libs.androidx.test.runner)
 }

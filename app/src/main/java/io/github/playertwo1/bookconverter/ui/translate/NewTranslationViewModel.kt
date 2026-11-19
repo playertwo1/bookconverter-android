@@ -10,13 +10,19 @@ import io.github.playertwo1.bookconverter.core.provider.translationModels
 import io.github.playertwo1.bookconverter.core.translate.Chunk
 import io.github.playertwo1.bookconverter.core.translate.Estimate
 import io.github.playertwo1.bookconverter.core.translate.PreviewResult
+import io.github.playertwo1.bookconverter.core.translate.Prompt
 import io.github.playertwo1.bookconverter.core.translate.chunk
 import io.github.playertwo1.bookconverter.core.translate.estimate
 import io.github.playertwo1.bookconverter.core.translate.preview
 import io.github.playertwo1.bookconverter.core.translate.sampleChunk
 import io.github.playertwo1.bookconverter.data.AppDatabase
 import io.github.playertwo1.bookconverter.data.Book
+import io.github.playertwo1.bookconverter.data.ChunkStatus
+import io.github.playertwo1.bookconverter.data.JobStatus
 import io.github.playertwo1.bookconverter.data.ProviderSettings
+import io.github.playertwo1.bookconverter.data.TranslationChunk
+import io.github.playertwo1.bookconverter.data.TranslationJob
+import io.github.playertwo1.bookconverter.worker.QueueManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,10 +67,13 @@ data class NewTranslationState(
     val askConsent: Boolean = false,
     /** Token ceiling typed by the user (D11/D12); digits only. Stored on the job in P2. */
     val budget: String = "",
+    val starting: Boolean = false,
+    val startError: String? = null,
 ) {
     val sample: Chunk? get() = chunks?.let { if (it.isEmpty()) null else sampleChunk(it) }
     val bookChars: Int get() = chunks?.sumOf { it.htmlChars } ?: 0
     val canPreview: Boolean get() = provider != null && model != null && sample != null && preview != PreviewState.Running
+    val canStart: Boolean get() = provider != null && model != null && !chunks.isNullOrEmpty() && preview != PreviewState.Running && !starting
     /** Upper estimate above the ceiling: the screen warns before the user starts. */
     val overBudget: Boolean
         get() {
@@ -195,6 +204,75 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
                     effort = if (done?.result?.effortRejected == true) null else st.effort,
                     budget = st.budget.ifEmpty { done?.estimate?.high?.total?.toString().orEmpty() },
                 )
+            }
+        }
+    }
+
+    fun startTranslation(onStarted: () -> Unit) {
+        val s = _state.value
+        val book = s.book ?: return
+        val chunks = s.chunks ?: return
+        val provider = s.provider ?: return
+        val model = s.model ?: return
+        if (s.starting) return
+
+        _state.update { it.copy(starting = true, startError = null) }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val now = System.currentTimeMillis()
+                    val tokenBudget = s.budget.toLongOrNull()?.takeIf { it > 0 }
+
+                    val job = TranslationJob(
+                        bookId = book.id,
+                        status = JobStatus.QUEUED,
+                        provider = provider.name,
+                        modelId = model,
+                        effort = s.effort,
+                        tokenBudget = tokenBudget,
+                        blockTotal = chunks.size,
+                        blockDone = 0,
+                        inputTokens = 0,
+                        outputTokens = 0,
+                        failureReason = null,
+                        createdAt = now,
+                        updatedAt = now,
+                    )
+
+                    val chunkEntities = chunks.mapIndexed { index, chunk ->
+                        TranslationChunk(
+                            jobId = 0,
+                            chunkIndex = index,
+                            spineIndex = chunk.blocks.first().spineIndex,
+                            startBlockIndex = chunk.blocks.first().index,
+                            endBlockIndex = chunk.blocks.last().index,
+                            blockCount = chunk.blocks.size,
+                            sourceText = Prompt.encode(chunk),
+                            translatedText = null,
+                            status = ChunkStatus.PENDING,
+                            attemptCount = 0,
+                            inputTokens = 0,
+                            outputTokens = 0,
+                            errorMessage = null,
+                            updatedAt = now,
+                        )
+                    }
+
+                    val dao = AppDatabase.get(getApplication()).translations()
+                    dao.createJobWithChunks(job, chunkEntities)
+                    QueueManager.enqueue(getApplication())
+                }
+                _state.update { it.copy(starting = false) }
+                withContext(Dispatchers.Main) {
+                    onStarted()
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        starting = false,
+                        startError = "Falha ao iniciar tradução: " + (e.message ?: e.javaClass.simpleName)
+                    )
+                }
             }
         }
     }

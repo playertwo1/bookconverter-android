@@ -32,9 +32,6 @@ import io.github.playertwo1.bookconverter.ui.theme.TextTertiary
 fun SeriesScreen() = PlaceholderScreen("Séries", "Séries e glossários chegam na fase P3.")
 
 @Composable
-fun ActivityScreen() = PlaceholderScreen("Atividade", "A fila de traduções chega na fase P2.")
-
-@Composable
 fun SettingsScreen(onOpenProviders: () -> Unit) {
     val context = LocalContext.current
     val version = context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()

@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Surface as M3Surface
+import io.github.playertwo1.bookconverter.ui.activity.ActivityScreen
 import io.github.playertwo1.bookconverter.ui.library.LibraryScreen
 import io.github.playertwo1.bookconverter.ui.settings.ProvidersScreen
 import io.github.playertwo1.bookconverter.ui.translate.NewTranslationScreen
@@ -67,6 +68,11 @@ fun AppScaffold() {
                     translating,
                     onBack = { translateBookId = null },
                     onOpenProviders = { showProviders = true },
+                    onStarted = {
+                        translateBookId = null
+                        openBookId = null
+                        tab = Tab.Atividade
+                    },
                 )
             }
             verifying != null -> {

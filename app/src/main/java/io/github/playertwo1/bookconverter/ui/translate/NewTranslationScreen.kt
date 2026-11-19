@@ -1,7 +1,13 @@
 package io.github.playertwo1.bookconverter.ui.translate
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import android.os.Build
 import android.text.Html
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -85,7 +91,12 @@ import io.github.playertwo1.bookconverter.ui.theme.TextTertiary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NewTranslationScreen(bookId: Long, onBack: () -> Unit, onOpenProviders: () -> Unit) {
+fun NewTranslationScreen(
+    bookId: Long,
+    onBack: () -> Unit,
+    onOpenProviders: () -> Unit,
+    onStarted: () -> Unit = {},
+) {
     val app = LocalContext.current.applicationContext as Application
     val vm: NewTranslationViewModel = viewModel(key = "translate-$bookId") { NewTranslationViewModel(app, bookId) }
     val state by vm.state.collectAsStateWithLifecycle()
@@ -96,6 +107,29 @@ fun NewTranslationScreen(bookId: Long, onBack: () -> Unit, onOpenProviders: () -
     }
     var showSheet by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
+
+    val context = LocalContext.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        vm.startTranslation(onStarted = onStarted)
+    }
+
+    val onStartClick = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                vm.startTranslation(onStarted = onStarted)
+            }
+        } else {
+            vm.startTranslation(onStarted = onStarted)
+        }
+    }
 
     val err = state.loadError
     val book = state.book
@@ -285,12 +319,21 @@ fun NewTranslationScreen(bookId: Long, onBack: () -> Unit, onOpenProviders: () -
                 )
             }
 
-            AppButton("Iniciar tradução", enabled = false, modifier = Modifier.fillMaxWidth()) {}
-            Text(
-                "A tradução do livro inteiro chega na fase P2.",
-                color = TextTertiary,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 8.dp),
+            if (state.startError != null) {
+                Text(
+                    state.startError ?: "",
+                    color = Danger,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+            AppButton(
+                label = if (state.starting) "Iniciando…" else "Iniciar tradução",
+                enabled = state.canStart,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onStartClick,
             )
             Spacer(Modifier.height(24.dp))
 
