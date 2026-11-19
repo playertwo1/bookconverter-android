@@ -16,6 +16,7 @@ import androidx.work.WorkerParameters
 import io.github.playertwo1.bookconverter.core.provider.Provider
 import io.github.playertwo1.bookconverter.core.provider.ProviderClient
 import io.github.playertwo1.bookconverter.core.translate.Effort
+import io.github.playertwo1.bookconverter.core.translate.Glossary
 import io.github.playertwo1.bookconverter.core.translate.JobOutcome
 import io.github.playertwo1.bookconverter.core.translate.JobProgress
 import io.github.playertwo1.bookconverter.core.translate.JobStatus as CoreJobStatus
@@ -197,6 +198,7 @@ class TranslationWorker(
                     }
                 }
 
+                val glossary = Glossary.parseSnapshot(job.glossarySnapshot)
                 val outcome = try {
                     engine.runJob(
                         jobId = job.id,
@@ -205,6 +207,8 @@ class TranslationWorker(
                         effort = job.effort,
                         tokenBudget = job.tokenBudget,
                         store = store,
+                        glossary = glossary,
+                        styleNotes = job.styleNotesSnapshot,
                         onProgress = { progress ->
                             val notif = buildNotification(bookTitle, progress.done, progress.total, job.id)
                             notificationManager.notify(NOTIFICATION_ID, notif)

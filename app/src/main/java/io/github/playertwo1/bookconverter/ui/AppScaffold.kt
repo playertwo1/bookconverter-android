@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Surface as M3Surface
 import io.github.playertwo1.bookconverter.ui.activity.ActivityScreen
 import io.github.playertwo1.bookconverter.ui.library.LibraryScreen
+import io.github.playertwo1.bookconverter.ui.quicktranslate.QuickTranslateScreen
+import io.github.playertwo1.bookconverter.ui.series.SeriesScreen
 import io.github.playertwo1.bookconverter.ui.settings.ProvidersScreen
 import io.github.playertwo1.bookconverter.ui.translate.NewTranslationScreen
 import io.github.playertwo1.bookconverter.ui.verify.VerificationScreen
@@ -54,10 +56,15 @@ fun AppScaffold() {
     var openBookId by rememberSaveable { mutableStateOf<Long?>(null) }
     var translateBookId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showProviders by rememberSaveable { mutableStateOf(false) }
+    var showQuickTranslate by rememberSaveable { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(Background)) {
         val verifying = openBookId
         val translating = translateBookId
         when {
+            showQuickTranslate -> {
+                BackHandler { showQuickTranslate = false }
+                QuickTranslateScreen(onBack = { showQuickTranslate = false })
+            }
             showProviders -> {
                 BackHandler { showProviders = false }
                 ProvidersScreen(onBack = { showProviders = false })
@@ -86,7 +93,10 @@ fun AppScaffold() {
             }
             else -> {
                 when (tab) {
-                    Tab.Biblioteca -> LibraryScreen(onOpenBook = { openBookId = it })
+                    Tab.Biblioteca -> LibraryScreen(
+                        onOpenBook = { openBookId = it },
+                        onOpenQuickTranslate = { showQuickTranslate = true },
+                    )
                     Tab.Series -> SeriesScreen()
                     Tab.Atividade -> ActivityScreen()
                     Tab.Ajustes -> SettingsScreen(onOpenProviders = { showProviders = true })

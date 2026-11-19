@@ -29,9 +29,6 @@ import io.github.playertwo1.bookconverter.ui.theme.TextSecondary
 import io.github.playertwo1.bookconverter.ui.theme.TextTertiary
 
 @Composable
-fun SeriesScreen() = PlaceholderScreen("Séries", "Séries e glossários chegam na fase P3.")
-
-@Composable
 fun SettingsScreen(onOpenProviders: () -> Unit) {
     val context = LocalContext.current
     val version = context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()
@@ -61,13 +58,5 @@ fun SettingsScreen(onOpenProviders: () -> Unit) {
             fontSize = 13.sp,
             modifier = Modifier.padding(top = 24.dp),
         )
-    }
-}
-
-@Composable
-private fun PlaceholderScreen(title: String, line: String) {
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(24.dp)) {
-        Text(title, style = MaterialTheme.typography.displaySmall, color = TextPrimary)
-        Text(line, color = TextSecondary, modifier = Modifier.padding(top = 12.dp))
     }
 }

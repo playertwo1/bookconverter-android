@@ -54,4 +54,8 @@ data class TranslationJob(
     val failureReason: String? = null,
     val createdAt: Long,
     val updatedAt: Long,
+    val seriesId: Long? = null,
+    val glossaryVersion: Int? = null,
+    val glossarySnapshot: String? = null,
+    val styleNotesSnapshot: String? = null,
 )

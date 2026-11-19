@@ -18,6 +18,27 @@ object Prompt {
 
   private val MARKER = Regex("⟦(\\d+)⟧")
 
+  fun systemPrompt(
+    glossary: List<GlossaryTerm> = emptyList(),
+    styleNotes: String? = null,
+    basePrompt: String = SYSTEM,
+  ): String {
+    if (glossary.isEmpty() && styleNotes.isNullOrBlank()) {
+      return basePrompt
+    }
+    val sb = StringBuilder(basePrompt)
+    if (glossary.isNotEmpty()) {
+      sb.append("\n\nGlossário obrigatório (use exatamente estas traduções):\n")
+      glossary.forEach { term ->
+        sb.append("- ${term.source} → ${term.target}\n")
+      }
+    }
+    if (!styleNotes.isNullOrBlank()) {
+      sb.append("\n\nNotas de estilo da série:\n").append(styleNotes.trim())
+    }
+    return sb.toString().trimEnd()
+  }
+
   fun encode(chunk: Chunk): String = chunk.blocks.mapIndexed { i, b -> "⟦${i + 1}⟧\n${b.html}" }.joinToString("\n\n")
 
   /**

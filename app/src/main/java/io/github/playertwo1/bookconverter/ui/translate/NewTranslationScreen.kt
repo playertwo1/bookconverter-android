@@ -106,6 +106,7 @@ fun NewTranslationScreen(
         onPauseOrDispose { }
     }
     var showSheet by remember { mutableStateOf(false) }
+    var showSeriesSheet by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
 
     val context = LocalContext.current
@@ -187,6 +188,44 @@ fun NewTranslationScreen(
                         fontSize = 13.sp,
                     )
                 }
+            }
+
+            SectionTitle("Série e Glossário")
+            val selectedSeriesSummary = state.selectedSeries
+            Card(onClick = { showSeriesSheet = true }) {
+                Column(Modifier.weight(1f)) {
+                    if (selectedSeriesSummary != null) {
+                        Text(
+                            selectedSeriesSummary.series.name,
+                            color = TextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        val termText = "${count(selectedSeriesSummary.termCount)} ${if (selectedSeriesSummary.termCount == 1) "termo" else "termos"}"
+                        val versionText = "v${selectedSeriesSummary.series.glossaryVersion}"
+                        val styleText = if (selectedSeriesSummary.series.styleNotes.isNotBlank()) " · com estilo" else ""
+                        Text(
+                            "$termText · Glossário $versionText$styleText",
+                            color = TextSecondary,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    } else {
+                        Text(
+                            "Sem série",
+                            color = TextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Nenhum termo de glossário ou estilo aplicado",
+                            color = TextSecondary,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                }
+                Text("›", color = TextSecondary, fontSize = 17.sp)
             }
 
             SectionTitle("Provedor de IA")
@@ -407,6 +446,74 @@ fun NewTranslationScreen(
                             fontSize = 15.sp,
                             modifier = Modifier.weight(1f),
                         )
+                        if (selected) Text("✓", color = Accent, fontSize = 17.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showSeriesSheet) {
+        ModalBottomSheet(onDismissRequest = { showSeriesSheet = false }, containerColor = Surface) {
+            LazyColumn(Modifier.padding(bottom = 24.dp)) {
+                item {
+                    val isNoneSelected = state.selectedSeriesId == null
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .clickable {
+                                vm.selectSeries(null)
+                                showSeriesSheet = false
+                            }
+                            .padding(horizontal = 24.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Sem série",
+                                color = if (isNoneSelected) TextPrimary else TextSecondary,
+                                fontSize = 15.sp,
+                                fontWeight = if (isNoneSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                            Text(
+                                "Tradução sem glossário ou estilo de série",
+                                color = TextTertiary,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        if (isNoneSelected) Text("✓", color = Accent, fontSize = 17.sp)
+                    }
+                }
+
+                items(state.seriesList) { summary ->
+                    val selected = summary.series.id == state.selectedSeriesId
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .clickable {
+                                vm.selectSeries(summary.series.id)
+                                showSeriesSheet = false
+                            }
+                            .padding(horizontal = 24.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                summary.series.name,
+                                color = if (selected) TextPrimary else TextSecondary,
+                                fontSize = 15.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                            val termText = "${count(summary.termCount)} ${if (summary.termCount == 1) "termo" else "termos"}"
+                            val versionText = "v${summary.series.glossaryVersion}"
+                            Text(
+                                "$termText · Glossário $versionText",
+                                color = TextTertiary,
+                                fontSize = 12.sp,
+                            )
+                        }
                         if (selected) Text("✓", color = Accent, fontSize = 17.sp)
                     }
                 }

@@ -9,6 +9,8 @@ import io.github.playertwo1.bookconverter.core.provider.ProviderError
 import io.github.playertwo1.bookconverter.core.provider.translationModels
 import io.github.playertwo1.bookconverter.core.translate.Chunk
 import io.github.playertwo1.bookconverter.core.translate.Estimate
+import io.github.playertwo1.bookconverter.core.translate.Glossary
+import io.github.playertwo1.bookconverter.core.translate.GlossaryTerm
 import io.github.playertwo1.bookconverter.core.translate.PreviewResult
 import io.github.playertwo1.bookconverter.core.translate.Prompt
 import io.github.playertwo1.bookconverter.core.translate.chunk
@@ -20,6 +22,7 @@ import io.github.playertwo1.bookconverter.data.Book
 import io.github.playertwo1.bookconverter.data.ChunkStatus
 import io.github.playertwo1.bookconverter.data.JobStatus
 import io.github.playertwo1.bookconverter.data.ProviderSettings
+import io.github.playertwo1.bookconverter.data.SeriesSummary
 import io.github.playertwo1.bookconverter.data.TranslationChunk
 import io.github.playertwo1.bookconverter.data.TranslationJob
 import io.github.playertwo1.bookconverter.worker.QueueManager
@@ -69,7 +72,12 @@ data class NewTranslationState(
     val budget: String = "",
     val starting: Boolean = false,
     val startError: String? = null,
+    val seriesList: List<SeriesSummary> = emptyList(),
+    val selectedSeriesId: Long? = null,
+    val seriesSelectionInitialized: Boolean = false,
 ) {
+    val selectedSeries: SeriesSummary?
+        get() = seriesList.firstOrNull { it.series.id == selectedSeriesId }
     val sample: Chunk? get() = chunks?.let { if (it.isEmpty()) null else sampleChunk(it) }
     val bookChars: Int get() = chunks?.sumOf { it.htmlChars } ?: 0
     val canPreview: Boolean get() = provider != null && model != null && sample != null && preview != PreviewState.Running
@@ -89,19 +97,49 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
     private var modelsJob: Job? = null
 
     init {
+        val db = AppDatabase.get(app)
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
                 try {
-                    val book = AppDatabase.get(app).books().byId(bookId) ?: return@withContext Result.failure(Exception("Livro não encontrado"))
+                    val book = db.books().byId(bookId) ?: return@withContext Result.failure(Exception("Livro não encontrado"))
                     val blocks = File(book.privatePath).inputStream().buffered().use { Epub.read(it) }.blocks()
                     Result.success(book to chunk(blocks))
                 } catch (e: Exception) {
                     Result.failure(e)
                 }
             }
-            loaded.onSuccess { (book, chunks) -> _state.update { it.copy(book = book, chunks = chunks) } }
-                .onFailure { e -> _state.update { it.copy(loadError = "Falha ao ler o livro: " + (e.message ?: e.javaClass.simpleName)) } }
+            loaded.onSuccess { (book, chunks) ->
+                _state.update { st ->
+                    val selectedId = if (!st.seriesSelectionInitialized) book.seriesId else st.selectedSeriesId
+                    st.copy(
+                        book = book,
+                        chunks = chunks,
+                        selectedSeriesId = selectedId,
+                        seriesSelectionInitialized = true,
+                    )
+                }
+            }.onFailure { e ->
+                _state.update { it.copy(loadError = "Falha ao ler o livro: " + (e.message ?: e.javaClass.simpleName)) }
+            }
         }
+
+        viewModelScope.launch {
+            db.series().observeAllSummaries().collect { summaries ->
+                _state.update { st ->
+                    val selectedId = if (!st.seriesSelectionInitialized && st.book != null) {
+                        st.book.seriesId
+                    } else {
+                        st.selectedSeriesId
+                    }
+                    st.copy(
+                        seriesList = summaries,
+                        selectedSeriesId = selectedId,
+                        seriesSelectionInitialized = st.seriesSelectionInitialized || (st.book != null),
+                    )
+                }
+            }
+        }
+
         val available = Provider.entries.filter(settings::hasKey)
         _state.update { it.copy(available = available) }
         (settings.lastProvider?.takeIf { it in available } ?: available.firstOrNull())?.let(::selectProvider)
@@ -154,6 +192,10 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
     fun selectEffort(effort: String?) {
         if (effort != null && effort in _state.value.rejectedEfforts) return
         _state.update { it.copy(effort = effort, preview = PreviewState.Idle) }
+    }
+
+    fun selectSeries(seriesId: Long?) {
+        _state.update { it.copy(selectedSeriesId = seriesId, seriesSelectionInitialized = true) }
     }
 
     fun setBudget(text: String) = _state.update { it.copy(budget = text.filter(Char::isDigit).take(12)) }
@@ -220,8 +262,32 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
+                    val db = AppDatabase.get(getApplication())
                     val now = System.currentTimeMillis()
                     val tokenBudget = s.budget.toLongOrNull()?.takeIf { it > 0 }
+
+                    val selectedSeriesId = s.selectedSeriesId
+                    val series = selectedSeriesId?.let { db.series().byId(it) }
+
+                    val (glossarySnapshot, styleNotesSnapshot, glossaryVersion) = if (series != null) {
+                        val entries = db.series().glossaryForSeries(series.id)
+                        val terms = entries.map { entry ->
+                            GlossaryTerm(
+                                source = entry.sourceTerm,
+                                target = entry.targetTerm,
+                                notes = entry.notes,
+                            )
+                        }
+                        val snapshot = Glossary.serializeSnapshot(terms)
+                        val styleNotes = series.styleNotes.takeIf { it.isNotBlank() }
+                        Triple(snapshot, styleNotes, series.glossaryVersion)
+                    } else {
+                        Triple(null, null, null)
+                    }
+
+                    if (book.seriesId != selectedSeriesId) {
+                        db.books().setSeries(book.id, selectedSeriesId)
+                    }
 
                     val job = TranslationJob(
                         bookId = book.id,
@@ -237,6 +303,10 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
                         failureReason = null,
                         createdAt = now,
                         updatedAt = now,
+                        seriesId = selectedSeriesId,
+                        glossaryVersion = glossaryVersion,
+                        glossarySnapshot = glossarySnapshot,
+                        styleNotesSnapshot = styleNotesSnapshot,
                     )
 
                     val chunkEntities = chunks.mapIndexed { index, chunk ->
@@ -258,7 +328,7 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
                         )
                     }
 
-                    val dao = AppDatabase.get(getApplication()).translations()
+                    val dao = db.translations()
                     dao.createJobWithChunks(job, chunkEntities)
                     QueueManager.enqueue(getApplication())
                 }

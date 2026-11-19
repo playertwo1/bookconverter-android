@@ -30,6 +30,14 @@ class BookImporterTest {
         override suspend fun byId(id: Long) = rows.firstOrNull { it.id == id }
         override suspend fun bySha(sha256: String) = rows.firstOrNull { it.sha256 == sha256 }
         override suspend fun insert(book: Book): Long { rows += book.copy(id = rows.size + 1L); return rows.size.toLong() }
+        override suspend fun setSeries(bookId: Long, seriesId: Long?) {
+            rows.indexOfFirst { it.id == bookId }.takeIf { it >= 0 }?.let {
+                rows[it] = rows[it].copy(seriesId = seriesId)
+            }
+        }
+        override suspend fun setBookSeries(bookId: Long, seriesId: Long?) = setSeries(bookId, seriesId)
+        override fun observeBySeries(seriesId: Long): Flow<List<Book>> = flowOf(rows.filter { it.seriesId == seriesId })
+        override suspend fun booksInSeries(seriesId: Long): List<Book> = rows.filter { it.seriesId == seriesId }
     }
 
     @Test fun importsRealEpubAsPrivateCopy() = runBlocking {

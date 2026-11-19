@@ -26,6 +26,7 @@ data class Book(
     val sourceName: String,
     val sizeBytes: Long,
     val importedAt: Long,
+    val seriesId: Long? = null,
 )
 
 @Dao
@@ -41,6 +42,18 @@ interface BookDao {
 
     @Insert
     suspend fun insert(book: Book): Long
+
+    @Query("UPDATE Book SET seriesId = :seriesId WHERE id = :bookId")
+    suspend fun setSeries(bookId: Long, seriesId: Long?)
+
+    @Query("UPDATE Book SET seriesId = :seriesId WHERE id = :bookId")
+    suspend fun setBookSeries(bookId: Long, seriesId: Long?)
+
+    @Query("SELECT * FROM Book WHERE seriesId = :seriesId ORDER BY importedAt DESC")
+    fun observeBySeries(seriesId: Long): Flow<List<Book>>
+
+    @Query("SELECT * FROM Book WHERE seriesId = :seriesId ORDER BY importedAt DESC")
+    suspend fun booksInSeries(seriesId: Long): List<Book>
 }
 
 // Every version bump needs a Migration plus a step in MigrationTest; there is no destructive fallback on purpose.
@@ -49,13 +62,16 @@ interface BookDao {
         Book::class,
         TranslationJob::class,
         TranslationChunk::class,
+        Series::class,
+        GlossaryEntry::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun books(): BookDao
     abstract fun translations(): TranslationDao
+    abstract fun series(): SeriesDao
 
     companion object {
         const val NAME = "bookconverter.db"
@@ -113,12 +129,52 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `Series` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `styleNotes` TEXT NOT NULL,
+                        `glossaryVersion` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `GlossaryEntry` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `seriesId` INTEGER NOT NULL,
+                        `sourceTerm` TEXT NOT NULL,
+                        `targetTerm` TEXT NOT NULL,
+                        `notes` TEXT,
+                        `updatedAt` INTEGER NOT NULL,
+                        FOREIGN KEY(`seriesId`) REFERENCES `Series`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_GlossaryEntry_seriesId` ON `GlossaryEntry` (`seriesId`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_GlossaryEntry_seriesId_sourceTerm` ON `GlossaryEntry` (`seriesId`, `sourceTerm`)")
+
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `seriesId` INTEGER DEFAULT NULL")
+
+                db.execSQL("ALTER TABLE `TranslationJob` ADD COLUMN `seriesId` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `TranslationJob` ADD COLUMN `glossaryVersion` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `TranslationJob` ADD COLUMN `glossarySnapshot` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `TranslationJob` ADD COLUMN `styleNotesSnapshot` TEXT DEFAULT NULL")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
                 .also { instance = it }
         }

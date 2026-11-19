@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -26,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -51,7 +53,11 @@ import io.github.playertwo1.bookconverter.ui.theme.TextPrimary
 import io.github.playertwo1.bookconverter.ui.theme.TextSecondary
 
 @Composable
-fun LibraryScreen(onOpenBook: (Long) -> Unit, vm: LibraryViewModel = viewModel()) {
+fun LibraryScreen(
+    onOpenBook: (Long) -> Unit,
+    onOpenQuickTranslate: () -> Unit = {},
+    vm: LibraryViewModel = viewModel(),
+) {
     val books by vm.books.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val importing by vm.importing.collectAsStateWithLifecycle()
@@ -69,17 +75,36 @@ fun LibraryScreen(onOpenBook: (Long) -> Unit, vm: LibraryViewModel = viewModel()
             Spacer(Modifier.height(24.dp))
         }
         item {
-            Button(
-                onClick = {
-                    vm.clearMessage()
-                    picker.launch(arrayOf("application/epub+zip", "application/octet-stream"))
-                },
-                enabled = !importing,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Accent),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(if (importing) "Importando…" else "+ Importar livro")
+                Button(
+                    onClick = {
+                        vm.clearMessage()
+                        picker.launch(arrayOf("application/epub+zip", "application/octet-stream"))
+                    },
+                    enabled = !importing,
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                ) {
+                    Text(if (importing) "Importando…" else "+ Importar livro")
+                }
+                OutlinedButton(
+                    onClick = onOpenQuickTranslate,
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Stroke),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = Surface,
+                        contentColor = TextPrimary,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                ) {
+                    Text("Traduzir texto")
+                }
             }
         }
         message?.let { msg ->

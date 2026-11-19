@@ -30,7 +30,7 @@ class MigrationTest {
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, "migration-test-v1")
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .build()
         runBlocking {
             assertEquals(1, db.books().all().first().size)
@@ -52,9 +52,12 @@ class MigrationTest {
         // Run migration and validate schema against 2.json
         helper.runMigrationsAndValidate(dbName, 2, true, AppDatabase.MIGRATION_1_2)
 
+        // Continue migration to 3 so Room database can open with current schema
+        helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_2_3)
+
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .build()
 
         runBlocking {
@@ -141,6 +144,131 @@ class MigrationTest {
             assertEquals("Dom Casmurro", jobsWithBook[0].bookTitle)
             assertEquals("Machado de Assis", jobsWithBook[0].bookAuthor)
             assertEquals(1, jobsWithBook[0].blockDone)
+        }
+        db.close()
+    }
+
+    @Test
+    fun migration2To3PreservesBooksAndJobs() {
+        val dbName = "migration-test-2-3"
+        helper.createDatabase(dbName, 2).apply {
+            execSQL(
+                "INSERT INTO Book (id, title, author, language, format, sha256, privatePath, sourceName, sizeBytes, importedAt) " +
+                    "VALUES (1, 'Memórias Póstumas', 'Machado de Assis', 'pt', 'EPUB', 'sha_memorias', '/data/memorias.epub', 'memorias.epub', 2048, 1000)"
+            )
+            execSQL(
+                "INSERT INTO TranslationJob (id, bookId, status, provider, modelId, effort, tokenBudget, blockTotal, blockDone, inputTokens, outputTokens, failureReason, createdAt, updatedAt) " +
+                    "VALUES (1, 1, 'QUEUED', 'OPENAI', 'gpt-4o', NULL, NULL, 5, 0, 0, 0, NULL, 1000, 1000)"
+            )
+            close()
+        }
+
+        // Validate migration to version 3 against 3.json
+        helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_2_3)
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .build()
+
+        runBlocking {
+            val books = db.books().all().first()
+            assertEquals(1, books.size)
+            assertEquals("Memórias Póstumas", books[0].title)
+            assertEquals(null, books[0].seriesId)
+
+            val job = db.translations().jobById(1)
+            assertNotNull(job)
+            assertEquals("QUEUED", job?.status)
+            assertEquals(null, job?.seriesId)
+            assertEquals(null, job?.glossaryVersion)
+            assertEquals(null, job?.glossarySnapshot)
+            assertEquals(null, job?.styleNotesSnapshot)
+
+            // Test SeriesDao and Book series association
+            val seriesId = db.series().insertSeries(
+                Series(
+                    name = "Trilogia Realista",
+                    styleNotes = "Tom irônico e formal",
+                    glossaryVersion = 1,
+                    createdAt = 1000L,
+                    updatedAt = 1000L,
+                )
+            )
+            assertEquals(1L, seriesId)
+
+            // Associate book with series
+            db.books().setSeries(1, seriesId)
+            val updatedBook = db.books().byId(1)
+            assertEquals(seriesId, updatedBook?.seriesId)
+
+            val booksInSeries = db.books().booksInSeries(seriesId)
+            assertEquals(1, booksInSeries.size)
+            assertEquals(1L, booksInSeries[0].id)
+
+            // Insert glossary entry
+            val termId = db.series().saveGlossaryEntryAndBump(
+                GlossaryEntry(
+                    seriesId = seriesId,
+                    sourceTerm = "humanitas",
+                    targetTerm = "Humanitas",
+                    notes = "Conceito filosófico de Quincas Borba",
+                    updatedAt = 2000L,
+                ),
+                now = 2000L
+            )
+            val glossary = db.series().glossaryForSeries(seriesId)
+            assertEquals(1, glossary.size)
+            assertEquals("humanitas", glossary[0].sourceTerm)
+
+            val updatedSeries = db.series().byId(seriesId)
+            assertEquals(2, updatedSeries?.glossaryVersion)
+            assertEquals(2000L, updatedSeries?.updatedAt)
+
+            // Verify SeriesSummary
+            val summaries = db.series().observeAllSummaries().first()
+            assertEquals(1, summaries.size)
+            assertEquals("Trilogia Realista", summaries[0].series.name)
+            assertEquals(1, summaries[0].bookCount)
+            assertEquals(1, summaries[0].termCount)
+
+            // Delete series preserves book (seriesId set to null)
+            db.series().deleteSeries(seriesId)
+            val bookAfterSeriesDelete = db.books().byId(1)
+            assertNotNull(bookAfterSeriesDelete)
+            assertEquals(null, bookAfterSeriesDelete?.seriesId)
+
+            val seriesAfterDelete = db.series().byId(seriesId)
+            assertEquals(null, seriesAfterDelete)
+            val glossaryAfterDelete = db.series().glossaryForSeries(seriesId)
+            assertEquals(0, glossaryAfterDelete.size)
+        }
+        db.close()
+    }
+
+    @Test
+    fun migration1To3PreservesData() {
+        val dbName = "migration-test-1-3"
+        helper.createDatabase(dbName, 1).apply {
+            execSQL(
+                "INSERT INTO Book (id, title, author, language, format, sha256, privatePath, sourceName, sizeBytes, importedAt) " +
+                    "VALUES (1, 'Quincas Borba', 'Machado de Assis', 'pt', 'EPUB', 'sha_borba', '/data/borba.epub', 'borba.epub', 1024, 1000)"
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .build()
+
+        runBlocking {
+            val books = db.books().all().first()
+            assertEquals(1, books.size)
+            assertEquals("Quincas Borba", books[0].title)
+            assertEquals(null, books[0].seriesId)
         }
         db.close()
     }
