@@ -668,10 +668,11 @@ private fun Chip(
 ) {
     Box(
         modifier
-            .height(48.dp)
+            .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(50))
             .background(if (selected) AccentSoft else Field)
-            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick),
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = 4.dp, horizontal = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -699,7 +700,7 @@ private fun AppButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(56.dp),
+        modifier = modifier.defaultMinSize(minHeight = 56.dp),
         shape = RoundedCornerShape(16.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = Accent,

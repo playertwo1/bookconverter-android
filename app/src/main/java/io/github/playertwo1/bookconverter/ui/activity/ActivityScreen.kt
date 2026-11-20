@@ -34,7 +34,7 @@ import androidx.compose.material3.Surface as M3Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,18 +70,16 @@ private val WarningText = Color(0xFFFBBF24)
 private val PositiveSoft = Color(0x2E35B77B)
 private val DangerSoft = Color(0x2EF36D7A)
 
-private data class PendingConfirmAction(
-    val job: JobWithBook,
-    val isDelete: Boolean,
-)
-
 @Composable
 fun ActivityScreen(
     modifier: Modifier = Modifier,
+    onReviewExport: (Long) -> Unit = {},
     vm: ActivityViewModel = viewModel(),
 ) {
     val uiState by vm.uiState.collectAsStateWithLifecycle()
-    var pendingAction by remember { mutableStateOf<PendingConfirmAction?>(null) }
+    var pendingJobId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var pendingActionType by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingBookTitle by rememberSaveable { mutableStateOf<String?>(null) }
 
     LazyColumn(
         modifier = modifier
@@ -111,7 +109,12 @@ fun ActivityScreen(
                         job = job,
                         onPause = { vm.pauseJob(job.id) },
                         onResume = { clearBudget -> vm.resumeJob(job.id, clearBudget) },
-                        onCancel = { pendingAction = PendingConfirmAction(job, isDelete = false) },
+                        onCancel = {
+                            pendingJobId = job.id
+                            pendingActionType = "cancel"
+                            pendingBookTitle = job.bookTitle
+                        },
+                        onReviewExport = { onReviewExport(job.id) },
                     )
                     Spacer(Modifier.height(16.dp))
                 }
@@ -126,7 +129,11 @@ fun ActivityScreen(
                     QueuedJobCard(
                         position = index + 1,
                         job = job,
-                        onCancel = { pendingAction = PendingConfirmAction(job, isDelete = false) },
+                        onCancel = {
+                            pendingJobId = job.id
+                            pendingActionType = "cancel"
+                            pendingBookTitle = job.bookTitle
+                        },
                     )
                     Spacer(Modifier.height(12.dp))
                 }
@@ -141,7 +148,12 @@ fun ActivityScreen(
                     HistoryJobCard(
                         job = job,
                         onResume = { vm.resumeJob(job.id) },
-                        onDelete = { pendingAction = PendingConfirmAction(job, isDelete = true) },
+                        onDelete = {
+                            pendingJobId = job.id
+                            pendingActionType = "delete"
+                            pendingBookTitle = job.bookTitle
+                        },
+                        onReviewExport = { onReviewExport(job.id) },
                     )
                     Spacer(Modifier.height(12.dp))
                 }
@@ -149,18 +161,28 @@ fun ActivityScreen(
         }
     }
 
-    pendingAction?.let { action ->
+    val currentJobId = pendingJobId
+    val currentActionType = pendingActionType
+    if (currentJobId != null && currentActionType != null) {
+        val isDelete = currentActionType == "delete"
         ConfirmActionDialog(
-            action = action,
+            bookTitle = pendingBookTitle ?: "",
+            isDelete = isDelete,
             onConfirm = {
-                if (action.isDelete) {
-                    vm.deleteJob(action.job.id)
+                if (isDelete) {
+                    vm.deleteJob(currentJobId)
                 } else {
-                    vm.cancelJob(action.job.id)
+                    vm.cancelJob(currentJobId)
                 }
-                pendingAction = null
+                pendingJobId = null
+                pendingActionType = null
+                pendingBookTitle = null
             },
-            onDismiss = { pendingAction = null },
+            onDismiss = {
+                pendingJobId = null
+                pendingActionType = null
+                pendingBookTitle = null
+            },
         )
     }
 }
@@ -183,6 +205,7 @@ private fun ActiveJobCard(
     onPause: () -> Unit,
     onResume: (clearBudget: Boolean) -> Unit,
     onCancel: () -> Unit,
+    onReviewExport: () -> Unit = {},
 ) {
     val percent = if (job.blockTotal > 0) (job.blockDone * 100 / job.blockTotal) else 0
     val progress = if (job.blockTotal > 0) job.blockDone.toFloat() / job.blockTotal.toFloat() else 0f
@@ -364,6 +387,21 @@ private fun ActiveJobCard(
                     }
                 }
             }
+
+            if (job.blockDone > 0) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = onReviewExport,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Stroke),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                ) {
+                    Text("Revisar / Exportar", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }
@@ -436,6 +474,7 @@ private fun HistoryJobCard(
     job: JobWithBook,
     onResume: () -> Unit,
     onDelete: () -> Unit,
+    onReviewExport: () -> Unit = {},
 ) {
     val totalTokens = job.inputTokens + job.outputTokens
 
@@ -502,6 +541,23 @@ private fun HistoryJobCard(
             }
 
             Spacer(Modifier.height(12.dp))
+
+            if (job.blockDone > 0) {
+                Button(
+                    onClick = onReviewExport,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (job.status == JobStatus.COMPLETED) Accent else Field,
+                        contentColor = TextPrimary,
+                    ),
+                ) {
+                    Text("Revisar / Exportar", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
 
             Row(
                 Modifier.fillMaxWidth(),
@@ -614,7 +670,8 @@ private fun EmptyActivityView() {
 
 @Composable
 private fun ConfirmActionDialog(
-    action: PendingConfirmAction,
+    bookTitle: String,
+    isDelete: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -625,17 +682,17 @@ private fun ConfirmActionDialog(
         textContentColor = TextSecondary,
         title = {
             Text(
-                if (action.isDelete) "Excluir registro de tradução?"
+                if (isDelete) "Excluir registro de tradução?"
                 else "Cancelar tradução?"
             )
         },
         text = {
             Column {
                 Text(
-                    if (action.isDelete)
-                        "Deseja realmente excluir o registro da tradução de \"${action.job.bookTitle}\"?"
+                    if (isDelete)
+                        "Deseja realmente excluir o registro da tradução de \"$bookTitle\"?"
                     else
-                        "Deseja realmente cancelar a tradução de \"${action.job.bookTitle}\"?",
+                        "Deseja realmente cancelar a tradução de \"$bookTitle\"?",
                     fontSize = 14.sp,
                     color = TextPrimary,
                 )
@@ -657,7 +714,7 @@ private fun ConfirmActionDialog(
                     contentColor = TextPrimary,
                 ),
             ) {
-                Text(if (action.isDelete) "Excluir" else "Cancelar tradução")
+                Text(if (isDelete) "Excluir" else "Cancelar tradução")
             }
         },
         dismissButton = {

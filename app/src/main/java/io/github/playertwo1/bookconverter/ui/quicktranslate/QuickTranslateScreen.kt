@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -349,7 +350,12 @@ fun QuickTranslateScreen(
                         fontSize = 13.sp,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = viewModel::clearError) {
+                    TextButton(
+                        onClick = viewModel::clearError,
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .semantics { contentDescription = "Fechar mensagem" },
+                    ) {
                         Text("✕", color = Danger, fontSize = 14.sp)
                     }
                 }
@@ -374,7 +380,12 @@ fun QuickTranslateScreen(
                         fontSize = 13.sp,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = viewModel::clearStatus) {
+                    TextButton(
+                        onClick = viewModel::clearStatus,
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .semantics { contentDescription = "Fechar mensagem" },
+                    ) {
                         Text("✕", color = Positive, fontSize = 14.sp)
                     }
                 }
@@ -487,7 +498,7 @@ private fun ExportButton(
 ) {
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.height(44.dp),
+        modifier = modifier.defaultMinSize(minHeight = 48.dp),
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, Stroke),
         colors = ButtonDefaults.outlinedButtonColors(

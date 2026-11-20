@@ -158,6 +158,31 @@ interface TranslationDao {
         syncJobProgress(jobId, updatedAt)
     }
 
+    @Query("""
+        UPDATE TranslationChunk 
+        SET status = 'COMPLETED', 
+            translatedText = :translatedText, 
+            errorMessage = NULL, 
+            updatedAt = :updatedAt 
+        WHERE id = :chunkId
+    """)
+    suspend fun updateChunkEdited(
+        chunkId: Long,
+        translatedText: String,
+        updatedAt: Long,
+    )
+
+    @Transaction
+    suspend fun saveEditedChunkAndSyncJob(
+        jobId: Long,
+        chunkId: Long,
+        translatedText: String,
+        updatedAt: Long,
+    ) {
+        updateChunkEdited(chunkId, translatedText, updatedAt)
+        syncJobProgress(jobId, updatedAt)
+    }
+
     @Query("SELECT COUNT(*) FROM TranslationChunk WHERE jobId = :jobId AND status = 'COMPLETED'")
     suspend fun countCompletedChunks(jobId: Long): Int
 

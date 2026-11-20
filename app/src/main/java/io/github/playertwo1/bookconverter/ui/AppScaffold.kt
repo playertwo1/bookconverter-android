@@ -32,6 +32,7 @@ import androidx.compose.material3.Surface as M3Surface
 import io.github.playertwo1.bookconverter.ui.activity.ActivityScreen
 import io.github.playertwo1.bookconverter.ui.library.LibraryScreen
 import io.github.playertwo1.bookconverter.ui.quicktranslate.QuickTranslateScreen
+import io.github.playertwo1.bookconverter.ui.review.ReviewExportScreen
 import io.github.playertwo1.bookconverter.ui.series.SeriesScreen
 import io.github.playertwo1.bookconverter.ui.settings.ProvidersScreen
 import io.github.playertwo1.bookconverter.ui.translate.NewTranslationScreen
@@ -55,11 +56,13 @@ fun AppScaffold() {
     var tab by rememberSaveable { mutableStateOf(Tab.Biblioteca) }
     var openBookId by rememberSaveable { mutableStateOf<Long?>(null) }
     var translateBookId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var reviewJobId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showProviders by rememberSaveable { mutableStateOf(false) }
     var showQuickTranslate by rememberSaveable { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(Background)) {
         val verifying = openBookId
         val translating = translateBookId
+        val reviewing = reviewJobId
         when {
             showQuickTranslate -> {
                 BackHandler { showQuickTranslate = false }
@@ -68,6 +71,13 @@ fun AppScaffold() {
             showProviders -> {
                 BackHandler { showProviders = false }
                 ProvidersScreen(onBack = { showProviders = false })
+            }
+            reviewing != null -> {
+                BackHandler { reviewJobId = null }
+                ReviewExportScreen(
+                    jobId = reviewing,
+                    onBack = { reviewJobId = null },
+                )
             }
             translating != null -> {
                 BackHandler { translateBookId = null }
@@ -98,7 +108,7 @@ fun AppScaffold() {
                         onOpenQuickTranslate = { showQuickTranslate = true },
                     )
                     Tab.Series -> SeriesScreen()
-                    Tab.Atividade -> ActivityScreen()
+                    Tab.Atividade -> ActivityScreen(onReviewExport = { reviewJobId = it })
                     Tab.Ajustes -> SettingsScreen(onOpenProviders = { showProviders = true })
                 }
                 FloatingNav(selected = tab, onSelect = { tab = it }, modifier = Modifier.align(Alignment.BottomCenter))

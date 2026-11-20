@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,7 +87,7 @@ fun SeriesScreen(
     val allBooks by vm.allBooks.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
 
-    var showCreateDialog by remember { mutableStateOf(false) }
+    var showCreateDialog by rememberSaveable { mutableStateOf(false) }
 
     if (selectedSeriesId != null && selectedSeries != null) {
         BackHandler { vm.selectSeries(null) }
@@ -324,11 +325,11 @@ private fun SeriesDetailScreen(
     onExportTxt: (Uri) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showRenameDialog by remember { mutableStateOf(false) }
-    var showLinkBooksDialog by remember { mutableStateOf(false) }
+    var showRenameDialog by rememberSaveable { mutableStateOf(false) }
+    var showLinkBooksDialog by rememberSaveable { mutableStateOf(false) }
     var termToEdit by remember { mutableStateOf<GlossaryEntry?>(null) }
-    var showAddTermDialog by remember { mutableStateOf(false) }
-    var showDeleteSeriesDialog by remember { mutableStateOf(false) }
+    var showAddTermDialog by rememberSaveable { mutableStateOf(false) }
+    var showDeleteSeriesDialog by rememberSaveable { mutableStateOf(false) }
 
     var notesText by remember(series.id, series.styleNotes) { mutableStateOf(series.styleNotes) }
     val isNotesModified = notesText != series.styleNotes
@@ -366,10 +367,10 @@ private fun SeriesDetailScreen(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .clickable(role = Role.Button, onClickLabel = "Voltar", onClick = onBack)
-                        .semantics { contentDescription = "Voltar para lista de séries" },
+                        .semantics { contentDescription = "Voltar" },
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("‹", fontSize = 28.sp, color = TextPrimary)
@@ -597,10 +598,12 @@ private fun SeriesDetailScreen(
                             onClick = { showAddTermDialog = true },
                             colors = ButtonDefaults.buttonColors(containerColor = Accent),
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .defaultMinSize(minHeight = 48.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                         ) {
-                            Text("+ Termo", fontSize = 12.sp, maxLines = 1)
+                            Text("+ Termo", fontSize = 12.sp, maxLines = 2)
                         }
                         OutlinedButton(
                             onClick = {
@@ -609,10 +612,12 @@ private fun SeriesDetailScreen(
                             border = BorderStroke(1.dp, Stroke),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                            modifier = Modifier.weight(1.1f),
+                            modifier = Modifier
+                                .weight(1.1f)
+                                .defaultMinSize(minHeight = 48.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                         ) {
-                            Text("Importar .txt", fontSize = 12.sp, maxLines = 1)
+                            Text("Importar .txt", fontSize = 12.sp, maxLines = 2)
                         }
                         OutlinedButton(
                             onClick = {
@@ -623,10 +628,12 @@ private fun SeriesDetailScreen(
                             border = BorderStroke(1.dp, Stroke),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                            modifier = Modifier.weight(1.1f),
+                            modifier = Modifier
+                                .weight(1.1f)
+                                .defaultMinSize(minHeight = 48.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                         ) {
-                            Text("Exportar .txt", fontSize = 12.sp, maxLines = 1)
+                            Text("Exportar .txt", fontSize = 12.sp, maxLines = 2)
                         }
                     }
                     Spacer(Modifier.height(16.dp))
@@ -687,6 +694,9 @@ private fun SeriesDetailScreen(
                                         }
                                         TextButton(
                                             onClick = { onDeleteTerm(entry.id) },
+                                            modifier = Modifier
+                                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                                .semantics { contentDescription = "Excluir termo" },
                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                             colors = ButtonDefaults.textButtonColors(contentColor = Danger),
                                         ) {
@@ -824,9 +834,12 @@ private fun MessageBanner(
             )
             Box(
                 modifier = Modifier
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                     .clip(CircleShape)
                     .clickable(role = Role.Button, onClickLabel = "Fechar", onClick = onDismiss)
+                    .semantics { contentDescription = "Fechar aviso" }
                     .padding(4.dp),
+                contentAlignment = Alignment.Center,
             ) {
                 Text("✕", color = TextSecondary, fontSize = 14.sp)
             }
@@ -839,9 +852,9 @@ private fun CreateSeriesDialog(
     onConfirm: (name: String, styleNotes: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var styleNotes by remember { mutableStateOf("") }
-    var showError by remember { mutableStateOf(false) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var styleNotes by rememberSaveable { mutableStateOf("") }
+    var showError by rememberSaveable { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -922,8 +935,8 @@ private fun RenameSeriesDialog(
     onConfirm: (newName: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var name by remember { mutableStateOf(currentName) }
-    var showError by remember { mutableStateOf(false) }
+    var name by rememberSaveable { mutableStateOf(currentName) }
+    var showError by rememberSaveable { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1090,7 +1103,7 @@ private fun AddEditTermDialog(
     var source by remember(initialEntry) { mutableStateOf(initialEntry?.sourceTerm.orEmpty()) }
     var target by remember(initialEntry) { mutableStateOf(initialEntry?.targetTerm.orEmpty()) }
     var notes by remember(initialEntry) { mutableStateOf(initialEntry?.notes.orEmpty()) }
-    var showError by remember { mutableStateOf(false) }
+    var showError by rememberSaveable { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,

@@ -85,7 +85,7 @@ fun LibraryScreen(
                         picker.launch(arrayOf("application/epub+zip", "application/octet-stream"))
                     },
                     enabled = !importing,
-                    modifier = Modifier.weight(1f).height(56.dp),
+                    modifier = Modifier.weight(1f).defaultMinSize(minHeight = 56.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Accent),
                     contentPadding = PaddingValues(horizontal = 8.dp),
@@ -94,7 +94,7 @@ fun LibraryScreen(
                 }
                 OutlinedButton(
                     onClick = onOpenQuickTranslate,
-                    modifier = Modifier.weight(1f).height(56.dp),
+                    modifier = Modifier.weight(1f).defaultMinSize(minHeight = 56.dp),
                     shape = RoundedCornerShape(16.dp),
                     border = BorderStroke(1.dp, Stroke),
                     colors = ButtonDefaults.outlinedButtonColors(
