@@ -1,7 +1,10 @@
 package io.github.playertwo1.bookconverter.data
 
+import io.github.playertwo1.bookconverter.core.epub.DrmProtected
 import io.github.playertwo1.bookconverter.core.epub.Epub
 import io.github.playertwo1.bookconverter.core.epub.EpubException
+import io.github.playertwo1.bookconverter.core.epub.MobiEpubPackager
+import io.github.playertwo1.bookconverter.core.epub.MobiSniffer
 import io.github.playertwo1.bookconverter.core.epub.Verification
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,14 +17,62 @@ class ImportResult(val book: Book, val alreadyInLibrary: Boolean, val verificati
 
 private const val MAX_FILE_BYTES = 512L * 1024 * 1024
 
+private enum class FileFormat { EPUB, MOBI }
+
 /** Decide by the file's bytes, not its extension or MIME type (the picker lets anything through). */
-private fun sniff(head: ByteArray) {
+private fun sniff(head: ByteArray): FileFormat {
     fun at(offset: Int, magic: String) =
         head.size >= offset + magic.length && String(head, offset, magic.length, Charsets.ISO_8859_1) == magic
-    when {
-        at(0, "%PDF") -> throw EpubException("PDF não é suportado: o app lê EPUB")
-        at(60, "BOOKMOBI") -> throw EpubException("MOBI/AZW3 ainda não é suportado: chega numa fase própria")
-        !at(0, "PK\u0003\u0004") -> throw EpubException("Não é um EPUB: o arquivo não é um ZIP")
+    return when {
+        at(0, "%PDF") -> throw EpubException("PDF não é suportado: o app lê EPUB, MOBI e AZW3")
+        at(60, "BOOKMOBI") -> FileFormat.MOBI
+        at(0, "PK\u0003\u0004") -> FileFormat.EPUB
+        else -> throw EpubException("Não é um EPUB: o arquivo não é um ZIP")
+    }
+}
+
+data class MobiConvertedMeta(
+    val format: String,
+    val title: String?,
+    val author: String?,
+    val language: String?,
+)
+
+internal fun defaultConvertMobi(source: File, targetEpub: File): MobiConvertedMeta {
+    val extractDir = File.createTempFile("mobi-extract-", ".tmp", targetEpub.parentFile ?: source.parentFile)
+    extractDir.delete()
+    extractDir.mkdirs()
+    try {
+        val res = try {
+            NativeMobiBridge.extract(source, extractDir)
+        } catch (e: Throwable) {
+            if (e is DrmProtected || e is EpubException) throw e
+            if (e is UnsatisfiedLinkError || e is NoClassDefFoundError) {
+                throw EpubException("Arquivo MOBI/AZW3 inválido ou não suportado neste ambiente")
+            }
+            throw e
+        }
+        if (res.status == "DRM") {
+            throw DrmProtected("Livro protegido por DRM (Amazon Kindle)")
+        }
+        if (res.status != "OK") {
+            throw EpubException(res.errorMessage ?: "Arquivo MOBI/AZW3 inválido ou corrompido")
+        }
+        MobiEpubPackager.packageExtractedDir(
+            extractedDir = extractDir,
+            outputEpub = targetEpub,
+            title = res.title,
+            author = res.author,
+            language = res.language,
+        )
+        return MobiConvertedMeta(
+            format = res.format.ifEmpty { "MOBI" },
+            title = res.title,
+            author = res.author,
+            language = res.language,
+        )
+    } finally {
+        extractDir.deleteRecursively()
     }
 }
 
@@ -36,6 +87,7 @@ suspend fun importEpub(
     booksDir: File,
     dao: BookDao,
     now: Long = System.currentTimeMillis(),
+    mobiToEpub: (source: File, targetEpub: File) -> MobiConvertedMeta = ::defaultConvertMobi,
 ): ImportResult = withContext(Dispatchers.IO) {
     booksDir.mkdirs()
     val tmp = File.createTempFile("import-", ".tmp", booksDir)
@@ -53,31 +105,85 @@ suspend fun importEpub(
                 out.write(buf, 0, n)
             }
         }
-        sniff(tmp.inputStream().use { it.readNBytes(68) })
-        val epub = tmp.inputStream().buffered().use { Epub.read(it) }
-        val verification = epub.verify()
-        if (verification.blocks == 0) throw EpubException("Nenhum texto extraível: o livro parece ter só imagens")
-        val sha = digest.digest().joinToString("") { "%02x".format(it) }
-        dao.bySha(sha)?.let { return@withContext ImportResult(it, alreadyInLibrary = true, verification) }
+        val format = sniff(tmp.inputStream().use { it.readNBytes(68) })
+        when (format) {
+            FileFormat.EPUB -> {
+                val epub = tmp.inputStream().buffered().use { Epub.read(it) }
+                val verification = epub.verify()
+                if (verification.blocks == 0) throw EpubException("Nenhum texto extraível: o livro parece ter só imagens")
+                val sha = digest.digest().joinToString("") { "%02x".format(it) }
+                dao.bySha(sha)?.let { return@withContext ImportResult(it, alreadyInLibrary = true, verification) }
 
-        val target = File(booksDir, "$sha.epub")
-        // A leftover from an import that died before the insert has the same hash, so replacing it is safe.
-        if (!tmp.renameTo(target) && !(target.delete() && tmp.renameTo(target))) {
-            throw IOException("Não consegui gravar a cópia privada do livro")
+                val target = File(booksDir, "$sha.epub")
+                // A leftover from an import that died before the insert has the same hash, so replacing it is safe.
+                if (!tmp.renameTo(target) && !(target.delete() && tmp.renameTo(target))) {
+                    throw IOException("Não consegui gravar a cópia privada do livro")
+                }
+                val book = Book(
+                    title = epub.title?.trim()?.takeIf { it.isNotEmpty() } ?: sourceName.substringBeforeLast('.'),
+                    author = epub.author?.trim()?.takeIf { it.isNotEmpty() },
+                    language = epub.language?.trim()?.takeIf { it.isNotEmpty() },
+                    format = "EPUB",
+                    sha256 = sha,
+                    privatePath = target.absolutePath,
+                    sourceName = sourceName,
+                    sizeBytes = size,
+                    importedAt = now,
+                )
+                ImportResult(book.copy(id = dao.insert(book)), alreadyInLibrary = false, verification)
+            }
+            FileFormat.MOBI -> {
+                val probe = MobiSniffer.probe(tmp)
+                if (probe?.isDrm == true) {
+                    throw DrmProtected("Livro protegido por DRM (Amazon Kindle)")
+                }
+                val sha = digest.digest().joinToString("") { "%02x".format(it) }
+                dao.bySha(sha)?.let { existing ->
+                    val verification = File(existing.privatePath).inputStream().buffered().use { Epub.read(it).verify() }
+                    return@withContext ImportResult(existing, alreadyInLibrary = true, verification)
+                }
+
+                val target = File(booksDir, "$sha.epub")
+                try {
+                    val meta = mobiToEpub(tmp, target)
+                    val epub = target.inputStream().buffered().use { Epub.read(it) }
+                    val verification = epub.verify()
+                    if (verification.blocks == 0) {
+                        target.delete()
+                        throw EpubException("Livro MOBI/AZW3 sem texto extraível")
+                    }
+                    val book = Book(
+                        title = meta.title?.trim()?.takeIf { it.isNotEmpty() }
+                            ?: epub.title?.trim()?.takeIf { it.isNotEmpty() }
+                            ?: sourceName.substringBeforeLast('.'),
+                        author = meta.author?.trim()?.takeIf { it.isNotEmpty() }
+                            ?: epub.author?.trim()?.takeIf { it.isNotEmpty() },
+                        language = meta.language?.trim()?.takeIf { it.isNotEmpty() }
+                            ?: epub.language?.trim()?.takeIf { it.isNotEmpty() },
+                        format = meta.format.ifBlank { probe?.kind?.name ?: "MOBI" },
+                        sha256 = sha,
+                        privatePath = target.absolutePath,
+                        sourceName = sourceName,
+                        sizeBytes = size,
+                        importedAt = now,
+                    )
+                    ImportResult(book.copy(id = dao.insert(book)), alreadyInLibrary = false, verification)
+                } catch (e: Throwable) {
+                    target.delete()
+                    throw e
+                }
+            }
         }
-        val book = Book(
-            title = epub.title?.trim()?.takeIf { it.isNotEmpty() } ?: sourceName.substringBeforeLast('.'),
-            author = epub.author?.trim()?.takeIf { it.isNotEmpty() },
-            language = epub.language?.trim()?.takeIf { it.isNotEmpty() },
-            format = "EPUB",
-            sha256 = sha,
-            privatePath = target.absolutePath,
-            sourceName = sourceName,
-            sizeBytes = size,
-            importedAt = now,
-        )
-        ImportResult(book.copy(id = dao.insert(book)), alreadyInLibrary = false, verification)
     } finally {
         tmp.delete() // no-op once renamed
     }
 }
+
+suspend fun importBook(
+    input: InputStream,
+    sourceName: String,
+    booksDir: File,
+    dao: BookDao,
+    now: Long = System.currentTimeMillis(),
+    mobiToEpub: (source: File, targetEpub: File) -> MobiConvertedMeta = ::defaultConvertMobi,
+): ImportResult = importEpub(input, sourceName, booksDir, dao, now, mobiToEpub)

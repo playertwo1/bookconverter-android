@@ -82,7 +82,7 @@ fun LibraryScreen(
                 Button(
                     onClick = {
                         vm.clearMessage()
-                        picker.launch(arrayOf("application/epub+zip", "application/octet-stream"))
+                        picker.launch(arrayOf("*/*"))
                     },
                     enabled = !importing,
                     modifier = Modifier.weight(1f).defaultMinSize(minHeight = 56.dp),
@@ -128,7 +128,7 @@ fun LibraryScreen(
         } else {
             item {
                 Spacer(Modifier.height(24.dp))
-                Text("Nenhum livro ainda. Importe um EPUB sem DRM.", color = TextSecondary)
+                Text("Nenhum livro ainda. Importe um EPUB, MOBI ou AZW3 sem DRM.", color = TextSecondary)
             }
         }
     }

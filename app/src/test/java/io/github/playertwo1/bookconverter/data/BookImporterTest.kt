@@ -1,6 +1,7 @@
 package io.github.playertwo1.bookconverter.data
 
 import io.github.playertwo1.bookconverter.core.epub.DrmProtected
+import io.github.playertwo1.bookconverter.core.epub.Epub
 import io.github.playertwo1.bookconverter.core.epub.EpubException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -14,6 +15,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -38,6 +40,30 @@ class BookImporterTest {
         override suspend fun setBookSeries(bookId: Long, seriesId: Long?) = setSeries(bookId, seriesId)
         override fun observeBySeries(seriesId: Long): Flow<List<Book>> = flowOf(rows.filter { it.seriesId == seriesId })
         override suspend fun booksInSeries(seriesId: Long): List<Book> = rows.filter { it.seriesId == seriesId }
+    }
+
+    private fun createSyntheticMobi(version: Int, encryption: Int, record0Offset: Int = 82): ByteArray {
+        val size = record0Offset + 40
+        val bytes = ByteArray(size)
+        "BOOKMOBI".toByteArray(Charsets.US_ASCII).copyInto(bytes, destinationOffset = 60)
+        bytes[78] = ((record0Offset shr 24) and 0xFF).toByte()
+        bytes[79] = ((record0Offset shr 16) and 0xFF).toByte()
+        bytes[80] = ((record0Offset shr 8) and 0xFF).toByte()
+        bytes[81] = (record0Offset and 0xFF).toByte()
+
+        bytes[record0Offset + 12] = ((encryption shr 8) and 0xFF).toByte()
+        bytes[record0Offset + 13] = (encryption and 0xFF).toByte()
+
+        bytes[record0Offset + 36] = ((version shr 24) and 0xFF).toByte()
+        bytes[record0Offset + 37] = ((version shr 16) and 0xFF).toByte()
+        bytes[record0Offset + 38] = ((version shr 8) and 0xFF).toByte()
+        bytes[record0Offset + 39] = (version and 0xFF).toByte()
+        return bytes
+    }
+
+    private fun sha256Of(bytes: ByteArray): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        return md.digest(bytes).joinToString("") { "%02x".format(it) }
     }
 
     @Test fun importsRealEpubAsPrivateCopy() = runBlocking {
@@ -106,6 +132,187 @@ class BookImporterTest {
             assertTrue(e.message!!, "DRM" in e.message!!)
         }
         assertEquals(0, dir.list()!!.size)
+    }
+
+    @Test fun refusesDrmMobiWithoutSavingOrInserting() = runBlocking {
+        val dir = tmp.newFolder("books")
+        val dao = FakeDao()
+        val drmMobi = createSyntheticMobi(version = 6, encryption = 2)
+
+        try {
+            importEpub(drmMobi.inputStream(), "protected.mobi", dir, dao)
+            fail("expected DrmProtected")
+        } catch (e: DrmProtected) {
+            assertTrue(e.message!!, "DRM" in e.message!!)
+        }
+
+        assertEquals(0, dao.rows.size)
+        assertEquals(0, dir.list()!!.size)
+    }
+
+    @Test fun refusesDrmAzw3WithoutSavingOrInserting() = runBlocking {
+        val dir = tmp.newFolder("books")
+        val dao = FakeDao()
+        val drmAzw3 = createSyntheticMobi(version = 8, encryption = 1)
+
+        try {
+            importEpub(drmAzw3.inputStream(), "protected.azw3", dir, dao)
+            fail("expected DrmProtected")
+        } catch (e: DrmProtected) {
+            assertTrue(e.message!!, "DRM" in e.message!!)
+        }
+
+        assertEquals(0, dao.rows.size)
+        assertEquals(0, dir.list()!!.size)
+    }
+
+    @Test fun importsMobiSuccessfullyWithStubPackager() = runBlocking {
+        val dir = tmp.newFolder("books")
+        val dao = FakeDao()
+        val mobiBytes = createSyntheticMobi(version = 6, encryption = 0)
+        val expectedSha = sha256Of(mobiBytes)
+
+        val r = importEpub(
+            input = mobiBytes.inputStream(),
+            sourceName = "my_book.mobi",
+            booksDir = dir,
+            dao = dao,
+            mobiToEpub = { _, target ->
+                animalFarm.copyTo(target, overwrite = true)
+                MobiConvertedMeta(
+                    format = "MOBI",
+                    title = "Livro MOBI Teste",
+                    author = "Autor MOBI",
+                    language = "pt"
+                )
+            }
+        )
+
+        assertFalse(r.alreadyInLibrary)
+        assertEquals("MOBI", r.book.format)
+        assertEquals("Livro MOBI Teste", r.book.title)
+        assertEquals("Autor MOBI", r.book.author)
+        assertEquals("pt", r.book.language)
+        assertEquals(expectedSha, r.book.sha256)
+        assertEquals(mobiBytes.size.toLong(), r.book.sizeBytes)
+        assertEquals("my_book.mobi", r.book.sourceName)
+        assertEquals(File(dir, "$expectedSha.epub").absolutePath, r.book.privatePath)
+        assertTrue(r.verification.blocks > 0)
+
+        // The converted EPUB is valid and readable
+        val readEpub = File(r.book.privatePath).inputStream().buffered().use { Epub.read(it) }
+        assertTrue(readEpub.verify().blocks > 0)
+        assertEquals(1, dao.rows.size)
+        assertEquals(1, dir.list()!!.size)
+    }
+
+    @Test fun importsAzw3SuccessfullyWithStubPackager() = runBlocking {
+        val dir = tmp.newFolder("books")
+        val dao = FakeDao()
+        val azw3Bytes = createSyntheticMobi(version = 8, encryption = 0)
+        val expectedSha = sha256Of(azw3Bytes)
+
+        val r = importEpub(
+            input = azw3Bytes.inputStream(),
+            sourceName = "kindle_fire.azw3",
+            booksDir = dir,
+            dao = dao,
+            mobiToEpub = { _, target ->
+                animalFarm.copyTo(target, overwrite = true)
+                MobiConvertedMeta(
+                    format = "AZW3",
+                    title = null, // Should fall back to epub title
+                    author = null, // Should fall back to epub author
+                    language = null // Should fall back to epub language
+                )
+            }
+        )
+
+        assertFalse(r.alreadyInLibrary)
+        assertEquals("AZW3", r.book.format)
+        // Fell back to animalFarm metadata
+        assertTrue(r.book.title.isNotBlank())
+        assertEquals("George Orwell", r.book.author)
+        assertEquals("en", r.book.language)
+        assertEquals(expectedSha, r.book.sha256)
+        assertEquals(azw3Bytes.size.toLong(), r.book.sizeBytes)
+        assertEquals("kindle_fire.azw3", r.book.sourceName)
+        assertEquals(File(dir, "$expectedSha.epub").absolutePath, r.book.privatePath)
+
+        val readEpub = File(r.book.privatePath).inputStream().buffered().use { Epub.read(it) }
+        assertTrue(readEpub.verify().blocks > 0)
+        assertEquals(1, dao.rows.size)
+        assertEquals(1, dir.list()!!.size)
+    }
+
+    @Test fun duplicateMobiImportReturnsExistingBook() = runBlocking {
+        val dir = tmp.newFolder("books")
+        val dao = FakeDao()
+        val mobiBytes = createSyntheticMobi(version = 6, encryption = 0)
+        val stubConverter: (File, File) -> MobiConvertedMeta = { _, target ->
+            animalFarm.copyTo(target, overwrite = true)
+            MobiConvertedMeta("MOBI", "Repetido", "Autor", "pt")
+        }
+
+        val first = importEpub(mobiBytes.inputStream(), "a.mobi", dir, dao, mobiToEpub = stubConverter)
+        assertFalse(first.alreadyInLibrary)
+
+        val second = importEpub(mobiBytes.inputStream(), "b.mobi", dir, dao, mobiToEpub = stubConverter)
+        assertTrue(second.alreadyInLibrary)
+        assertEquals(first.book.id, second.book.id)
+        assertEquals(1, dao.rows.size)
+        assertEquals(1, dir.list()!!.size)
+    }
+
+    @Test fun emptyTextMobiThrowsExceptionAndDeletesTarget() = runBlocking {
+        val dir = tmp.newFolder("books")
+        val dao = FakeDao()
+        val mobiBytes = createSyntheticMobi(version = 6, encryption = 0)
+
+        try {
+            importEpub(
+                input = mobiBytes.inputStream(),
+                sourceName = "empty.mobi",
+                booksDir = dir,
+                dao = dao,
+                mobiToEpub = { _, target ->
+                    // Create an empty or zero-block epub
+                    writeEmptyEpub(target)
+                    MobiConvertedMeta("MOBI", "Sem Texto", null, null)
+                }
+            )
+            fail("expected EpubException")
+        } catch (e: EpubException) {
+            assertTrue(e.message!!, "sem texto extraível" in e.message!!.lowercase())
+        }
+
+        assertEquals(0, dao.rows.size)
+        assertEquals(0, dir.list()!!.size)
+    }
+}
+
+private fun writeEmptyEpub(output: File) {
+    output.parentFile?.mkdirs()
+    ZipOutputStream(output.outputStream()).use { zip ->
+        zip.putNextEntry(ZipEntry("mimetype"))
+        zip.write("application/epub+zip".toByteArray())
+        zip.closeEntry()
+
+        zip.putNextEntry(ZipEntry("META-INF/container.xml"))
+        zip.write("""<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""".toByteArray())
+        zip.closeEntry()
+
+        zip.putNextEntry(ZipEntry("content.opf"))
+        zip.write("""<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Empty</dc:title><dc:language>en</dc:language><dc:identifier id="id">empty</dc:identifier></metadata><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="p1" href="part.xhtml" media-type="application/xhtml+xml"/></manifest><spine toc="ncx"><itemref idref="p1"/></spine></package>""".toByteArray())
+        zip.closeEntry()
+
+        zip.putNextEntry(ZipEntry("toc.ncx"))
+        zip.write("""<ncx version="2005-1" xmlns="http://www.daisy.org/z3986/2005/ncx/"><head><meta name="dtb:uid" content="empty"/></head><docTitle><text>Empty</text></docTitle><navMap><navPoint id="np1" playOrder="1"><navLabel><text>P1</text></navLabel><content src="part.xhtml"/></navPoint></navMap></ncx>""".toByteArray())
+        zip.closeEntry()
+
+        zip.putNextEntry(ZipEntry("part.xhtml"))
+        zip.write("""<!DOCTYPE html><html><head><title>P1</title></head><body></body></html>""".toByteArray())
+        zip.closeEntry()
     }
 }
 
