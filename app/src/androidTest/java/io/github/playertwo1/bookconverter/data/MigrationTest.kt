@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,7 +32,7 @@ class MigrationTest {
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, "migration-test-v1")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .build()
         runBlocking {
             assertEquals(1, db.books().all().first().size)
@@ -52,13 +54,14 @@ class MigrationTest {
         // Run migration and validate schema against 2.json
         helper.runMigrationsAndValidate(dbName, 2, true, AppDatabase.MIGRATION_1_2)
 
-        // Continue migration to 3 and 4 so Room database can open with current schema
+        // Continue migration to 3, 4 and 5 so Room database can open with current schema
         helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_2_3)
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
+        helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .build()
 
         runBlocking {
@@ -167,12 +170,13 @@ class MigrationTest {
         // Validate migration to version 3 against 3.json
         helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_2_3)
 
-        // Continue migration to 4 so Room database can open with current schema
+        // Continue migration to 4 and 5 so Room database can open with current schema
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
+        helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .build()
 
         runBlocking {
@@ -263,10 +267,11 @@ class MigrationTest {
 
         helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
+        helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .build()
 
         runBlocking {
@@ -304,9 +309,12 @@ class MigrationTest {
         // Validate migration to version 4 against 4.json
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
 
+        // Continue migration to 5 so Room database can open with current schema
+        helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
+
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .build()
 
         runBlocking {
@@ -443,10 +451,11 @@ class MigrationTest {
         }
 
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+        helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .build()
 
         runBlocking {
@@ -485,5 +494,153 @@ class MigrationTest {
             assertEquals("Conselheiro Aires", entries[0].sourceTerm)
         }
         db.close()
+    }
+
+    @Test
+    fun migration4To5PreservesDataAndAddsBatchFields() {
+        val dbName = "migration-test-4-5"
+        helper.createDatabase(dbName, 4).apply {
+            execSQL(
+                "INSERT INTO Book (id, title, author, language, format, sha256, privatePath, sourceName, sizeBytes, importedAt, seriesId) " +
+                    "VALUES (1, 'Dom Casmurro', 'Machado de Assis', 'pt', 'EPUB', 'sha_casmurro', '/data/casmurro.epub', 'casmurro.epub', 1024, 1000, NULL)"
+            )
+            execSQL(
+                "INSERT INTO TranslationJob (id, bookId, status, provider, modelId, effort, tokenBudget, blockTotal, blockDone, inputTokens, outputTokens, failureReason, createdAt, updatedAt, seriesId, glossaryVersion, glossarySnapshot, styleNotesSnapshot) " +
+                    "VALUES (1, 1, 'QUEUED', 'OPENAI', 'gpt-4o', NULL, NULL, 2, 0, 0, 0, NULL, 1000, 1000, NULL, NULL, NULL, NULL)"
+            )
+            execSQL(
+                "INSERT INTO TranslationChunk (id, jobId, chunkIndex, spineIndex, startBlockIndex, endBlockIndex, blockCount, sourceText, translatedText, status, attemptCount, inputTokens, outputTokens, errorMessage, updatedAt) " +
+                    "VALUES (1, 1, 0, 0, 0, 1, 2, '⟦1⟧Capítulo 1⟦2⟧Texto', NULL, 'PENDING', 0, 0, 0, NULL, 1000)"
+            )
+            close()
+        }
+
+        // Validate migration to version 5 against 5.json
+        helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .build()
+
+        runBlocking {
+            // Verify existing job preserved with default executionMode="SYNC" and remoteBatchId=null
+            val job = db.translations().jobById(1)
+            assertNotNull(job)
+            assertEquals("SYNC", job?.executionMode)
+            assertEquals(null, job?.remoteBatchId)
+
+            // Verify updateJobBatchId updates batch ID and transitions to WAITING_BATCH
+            val updateTime = 2000L
+            db.translations().updateJobBatchId(1, "batch_remote_999", JobStatus.WAITING_BATCH, updateTime)
+            val updatedJob = db.translations().jobById(1)
+            assertEquals("batch_remote_999", updatedJob?.remoteBatchId)
+            assertEquals(JobStatus.WAITING_BATCH, updatedJob?.status)
+            assertEquals(updateTime, updatedJob?.updatedAt)
+
+            // Verify nextRunnableJob picks up WAITING_BATCH job
+            val runnableJob = db.translations().nextRunnableJob()
+            assertNotNull(runnableJob)
+            assertEquals(1L, runnableJob?.id)
+            assertEquals(JobStatus.WAITING_BATCH, runnableJob?.status)
+
+            // Verify pendingChunksForJob
+            val pending = db.translations().pendingChunksForJob(1)
+            assertEquals(1, pending.size)
+            assertEquals(0, pending[0].chunkIndex)
+
+            // Verify markBatchChunkCompleted delegates and syncs job progress
+            db.translations().markBatchChunkCompleted(
+                jobId = 1,
+                chunkId = 1,
+                translatedText = "⟦1⟧Chapter 1⟦2⟧Text",
+                inputTokens = 120L,
+                outputTokens = 250L,
+                updatedAt = 3000L
+            )
+            val chunk = db.translations().chunkById(1)
+            assertNotNull(chunk)
+            assertEquals("COMPLETED", chunk?.status)
+            assertEquals("⟦1⟧Chapter 1⟦2⟧Text", chunk?.translatedText)
+
+            val syncedJob = db.translations().jobById(1)
+            assertNotNull(syncedJob)
+            assertEquals(1, syncedJob?.blockDone)
+            assertEquals(120L, syncedJob?.inputTokens)
+            assertEquals(250L, syncedJob?.outputTokens)
+        }
+        db.close()
+    }
+
+    @Test
+    fun migration1To5PreservesData() {
+        val dbName = "migration-test-1-5"
+        helper.createDatabase(dbName, 1).apply {
+            execSQL(
+                "INSERT INTO Book (id, title, author, language, format, sha256, privatePath, sourceName, sizeBytes, importedAt) " +
+                    "VALUES (1, 'Helena', 'Machado de Assis', 'pt', 'EPUB', 'sha_helena', '/data/helena.epub', 'helena.epub', 1024, 1000)"
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            dbName,
+            5,
+            true,
+            AppDatabase.MIGRATION_1_2,
+            AppDatabase.MIGRATION_2_3,
+            AppDatabase.MIGRATION_3_4,
+            AppDatabase.MIGRATION_4_5
+        )
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5
+            )
+            .build()
+
+        runBlocking {
+            val books = db.books().all().first()
+            assertEquals(1, books.size)
+            assertEquals("Helena", books[0].title)
+            assertEquals(null, books[0].seriesId)
+
+            val job = TranslationJob(
+                bookId = 1,
+                status = JobStatus.WAITING_BATCH,
+                provider = TranslationProvider.OPENAI,
+                modelId = "gpt-4o",
+                blockTotal = 1,
+                createdAt = 1000L,
+                updatedAt = 1000L,
+                executionMode = "BATCH",
+                remoteBatchId = "batch_abc",
+            )
+            val jobId = db.translations().insertJob(job)
+            val loadedJob = db.translations().jobById(jobId)
+            assertNotNull(loadedJob)
+            assertEquals("BATCH", loadedJob?.executionMode)
+            assertEquals("batch_abc", loadedJob?.remoteBatchId)
+            assertEquals(JobStatus.WAITING_BATCH, loadedJob?.status)
+        }
+        db.close()
+    }
+
+    @Test
+    fun closeInstanceClosesAndResetsSingleton() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db1 = AppDatabase.get(context)
+        val db2 = AppDatabase.get(context)
+        assertSame(db1, db2)
+
+        AppDatabase.closeInstance()
+        val db3 = AppDatabase.get(context)
+        assertNotNull(db3)
+        assertNotSame(db1, db3)
+        AppDatabase.closeInstance()
     }
 }

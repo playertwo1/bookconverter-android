@@ -66,7 +66,7 @@ interface BookDao {
         GlossaryEntry::class,
         SeriesMemoryEntry::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -196,14 +196,28 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `TranslationJob` ADD COLUMN `executionMode` TEXT NOT NULL DEFAULT 'SYNC'")
+                db.execSQL("ALTER TABLE `TranslationJob` ADD COLUMN `remoteBatchId` TEXT DEFAULT NULL")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 .also { instance = it }
+        }
+
+        fun closeInstance() {
+            synchronized(this) {
+                instance?.close()
+                instance = null
+            }
         }
     }
 }

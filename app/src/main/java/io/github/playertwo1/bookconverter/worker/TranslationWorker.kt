@@ -13,14 +13,21 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import io.github.playertwo1.bookconverter.core.provider.BatchJobState
+import io.github.playertwo1.bookconverter.core.provider.BatchProviderClient
+import io.github.playertwo1.bookconverter.core.provider.BatchRequestItem
+import io.github.playertwo1.bookconverter.core.provider.ErrorKind
 import io.github.playertwo1.bookconverter.core.provider.Provider
 import io.github.playertwo1.bookconverter.core.provider.ProviderClient
+import io.github.playertwo1.bookconverter.core.provider.ProviderError
+import io.github.playertwo1.bookconverter.core.provider.batchProviderClient
 import io.github.playertwo1.bookconverter.core.translate.Effort
 import io.github.playertwo1.bookconverter.core.translate.Glossary
 import io.github.playertwo1.bookconverter.core.translate.GlossaryTerm
 import io.github.playertwo1.bookconverter.core.translate.JobOutcome
 import io.github.playertwo1.bookconverter.core.translate.JobProgress
 import io.github.playertwo1.bookconverter.core.translate.JobStatus as CoreJobStatus
+import io.github.playertwo1.bookconverter.core.translate.Prompt
 import io.github.playertwo1.bookconverter.core.translate.StoredChunk
 import io.github.playertwo1.bookconverter.core.translate.TranslationEngine
 import io.github.playertwo1.bookconverter.core.translate.TranslationStore
@@ -28,6 +35,8 @@ import io.github.playertwo1.bookconverter.data.AppDatabase
 import io.github.playertwo1.bookconverter.data.JobStatus
 import io.github.playertwo1.bookconverter.data.MemoryCategory
 import io.github.playertwo1.bookconverter.data.ProviderSettings
+import io.github.playertwo1.bookconverter.data.TranslationDao
+import io.github.playertwo1.bookconverter.data.TranslationJob
 import kotlinx.coroutines.CancellationException
 
 class TranslationWorker(
@@ -66,6 +75,7 @@ class TranslationWorker(
 
         val providerSettings = ProviderSettings(applicationContext)
         val engine = TranslationEngine()
+        var keepNotificationOnExit = false
 
         try {
             while (true) {
@@ -76,6 +86,26 @@ class TranslationWorker(
                 val job = dao.nextRunnableJob() ?: break
                 val book = db.books().byId(job.bookId)
                 val bookTitle = book?.title ?: "Livro"
+
+                val freshJob = dao.jobById(job.id) ?: continue
+                if (freshJob.status == JobStatus.PAUSED || freshJob.status == JobStatus.CANCELLED) {
+                    continue
+                }
+
+                if (freshJob.executionMode == "BATCH") {
+                    val batchResult = runBatchJob(
+                        job = freshJob,
+                        settings = providerSettings,
+                        dao = dao,
+                        bookTitle = bookTitle,
+                        db = db,
+                    )
+                    if (batchResult == BatchRunResult.RETRY) {
+                        keepNotificationOnExit = true
+                        return Result.retry()
+                    }
+                    continue
+                }
 
                 // Update notification for current job
                 val currentNotif = buildNotification(bookTitle, job.blockDone, job.blockTotal, job.id)
@@ -105,11 +135,6 @@ class TranslationWorker(
                         "Credencial ausente ou expirada para ${provider.name}. Configure em Ajustes."
                     }
                     dao.updateJobStatus(job.id, JobStatus.FAILED, errorMsg, now)
-                    continue
-                }
-
-                val freshJob = dao.jobById(job.id) ?: continue
-                if (freshJob.status == JobStatus.PAUSED || freshJob.status == JobStatus.CANCELLED) {
                     continue
                 }
 
@@ -271,7 +296,238 @@ class TranslationWorker(
             }
             return Result.success()
         } finally {
-            notificationManager.cancel(NOTIFICATION_ID)
+            if (!keepNotificationOnExit) {
+                notificationManager.cancel(NOTIFICATION_ID)
+            }
+        }
+    }
+
+    private suspend fun runBatchJob(
+        job: TranslationJob,
+        settings: ProviderSettings,
+        dao: TranslationDao,
+        bookTitle: String = "Livro",
+        db: AppDatabase = AppDatabase.get(applicationContext),
+    ): BatchRunResult {
+        val now = System.currentTimeMillis()
+        val provider = try {
+            Provider.valueOf(job.provider)
+        } catch (e: IllegalArgumentException) {
+            null
+        }
+
+        if (provider == null) {
+            dao.updateJobStatus(job.id, JobStatus.FAILED, "Provedor desconhecido: ${job.provider}", now)
+            return BatchRunResult.DONE
+        }
+
+        if (provider == Provider.CHATGPT) {
+            dao.updateJobStatus(
+                job.id,
+                JobStatus.FAILED,
+                "O plano ChatGPT não suporta modo Batch. Use OpenAI com API Key.",
+                now
+            )
+            return BatchRunResult.DONE
+        }
+
+        val apiKey = settings.key(provider)
+        if (apiKey.isNullOrBlank()) {
+            dao.updateJobStatus(
+                job.id,
+                JobStatus.FAILED,
+                "Credencial ausente ou expirada para ${provider.name}. Configure em Ajustes.",
+                now
+            )
+            return BatchRunResult.DONE
+        }
+
+        val baseUrl = settings.baseUrl(provider)
+        val batchClient: BatchProviderClient = try {
+            batchProviderClient(provider, apiKey, baseUrl)
+        } catch (pe: ProviderError) {
+            return handleBatchProviderError(job.id, dao, pe)
+        } catch (e: Exception) {
+            dao.updateJobStatus(job.id, JobStatus.FAILED, e.message ?: "Erro ao inicializar cliente Batch", now)
+            return BatchRunResult.DONE
+        }
+
+        val glossary = Glossary.parseSnapshot(job.glossarySnapshot)
+        val approvedMemory = if (job.seriesId != null) {
+            db.series().approvedMemoryForSeries(job.seriesId)
+        } else {
+            emptyList()
+        }
+        val characters = approvedMemory
+            .filter { it.category == MemoryCategory.CHARACTER }
+            .map { GlossaryTerm(it.sourceTerm, it.targetTerm, it.notes) }
+        val examplePairs = approvedMemory
+            .filter { it.category == MemoryCategory.PAIR }
+            .map { GlossaryTerm(it.sourceTerm, it.targetTerm, it.notes) }
+            .take(5)
+        val styleNotes = job.styleNotesSnapshot
+
+        if (job.remoteBatchId == null) {
+            val pending = dao.pendingChunksForJob(job.id)
+            if (pending.isEmpty()) {
+                dao.updateJobStatus(job.id, JobStatus.COMPLETED, null, now)
+                return BatchRunResult.DONE
+            }
+
+            val items = pending.map { chunk ->
+                val matchedGlossary = Glossary.matchTerms(chunk.sourceText, glossary)
+                val matchedChars = Glossary.matchTerms(chunk.sourceText, characters)
+                val systemPrompt = Prompt.systemPrompt(
+                    glossary = matchedGlossary,
+                    styleNotes = styleNotes,
+                    characters = matchedChars,
+                    examplePairs = examplePairs,
+                )
+                BatchRequestItem(
+                    customId = chunk.id.toString(),
+                    systemPrompt = systemPrompt,
+                    userText = chunk.sourceText,
+                )
+            }
+
+            val batchId = try {
+                batchClient.submitBatch(job.modelId, job.effort, items)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (pe: ProviderError) {
+                return handleBatchProviderError(job.id, dao, pe)
+            } catch (e: Exception) {
+                dao.updateJobStatus(job.id, JobStatus.FAILED, e.message ?: "Erro ao submeter lote Batch", System.currentTimeMillis())
+                return BatchRunResult.DONE
+            }
+
+            val submitTime = System.currentTimeMillis()
+            dao.updateJobBatchId(job.id, batchId, JobStatus.WAITING_BATCH, submitTime)
+            val notif = buildNotification(bookTitle, "Lote Batch enviado (${items.size} blocos)", 0, items.size, job.id, ongoing = false)
+            notificationManager.notify(NOTIFICATION_ID, notif)
+            return BatchRunResult.RETRY
+        } else {
+            val batchId = job.remoteBatchId
+            val status = try {
+                batchClient.pollBatch(batchId)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (pe: ProviderError) {
+                return handleBatchProviderError(job.id, dao, pe)
+            } catch (e: Exception) {
+                dao.updateJobStatus(job.id, JobStatus.FAILED, e.message ?: "Erro ao consultar status do lote Batch", System.currentTimeMillis())
+                return BatchRunResult.DONE
+            }
+
+            when (status.state) {
+                BatchJobState.SUBMITTED,
+                BatchJobState.IN_PROGRESS -> {
+                    val notifText = "Lote Batch em processamento (${status.doneCount}/${status.totalCount})"
+                    val notif = buildNotification(bookTitle, notifText, status.doneCount, status.totalCount, job.id, ongoing = false)
+                    notificationManager.notify(NOTIFICATION_ID, notif)
+                    return BatchRunResult.RETRY
+                }
+
+                BatchJobState.COMPLETED -> {
+                    val results = try {
+                        batchClient.fetchResults(batchId)
+                    } catch (ce: CancellationException) {
+                        throw ce
+                    } catch (pe: ProviderError) {
+                        return handleBatchProviderError(job.id, dao, pe)
+                    } catch (e: Exception) {
+                        dao.updateJobStatus(job.id, JobStatus.FAILED, e.message ?: "Erro ao obter resultados do lote Batch", System.currentTimeMillis())
+                        return BatchRunResult.DONE
+                    }
+
+                    val allChunks = dao.chunksForJob(job.id)
+                    val chunksById = allChunks.associateBy { it.id }
+
+                    for (item in results) {
+                        val chunkId = item.customId.toLongOrNull() ?: continue
+                        val chunk = chunksById[chunkId] ?: continue
+                        if (chunk.status == "COMPLETED") continue
+
+                        val itemTime = System.currentTimeMillis()
+                        val text = item.text
+                        if (item.errorMessage != null || text.isNullOrBlank()) {
+                            val err = item.errorMessage ?: "Resposta vazia do lote Batch"
+                            dao.markChunkFailed(chunk.id, chunk.attemptCount + 1, err, itemTime)
+                        } else {
+                            try {
+                                Prompt.decode(text, chunk.blockCount)
+                                dao.markBatchChunkCompleted(
+                                    jobId = job.id,
+                                    chunkId = chunk.id,
+                                    translatedText = text,
+                                    inputTokens = item.inputTokens,
+                                    outputTokens = item.outputTokens,
+                                    updatedAt = itemTime,
+                                )
+                            } catch (e: Exception) {
+                                val err = e.message ?: "Resposta fora do formato esperado"
+                                dao.markChunkFailed(chunk.id, chunk.attemptCount + 1, err, itemTime)
+                            }
+                        }
+                    }
+
+                    val updatedChunks = dao.chunksForJob(job.id)
+                    val remainingPending = updatedChunks.filter { it.status == "PENDING" }
+                    val failedChunks = updatedChunks.filter { it.status == "FAILED" }
+                    val finishTime = System.currentTimeMillis()
+
+                    if (remainingPending.isEmpty() && failedChunks.isEmpty()) {
+                        dao.updateJobStatus(job.id, JobStatus.COMPLETED, null, finishTime)
+                        val doneNotif = buildNotification(bookTitle, updatedChunks.size, updatedChunks.size, job.id, ongoing = false)
+                        notificationManager.notify(NOTIFICATION_ID, doneNotif)
+                    } else {
+                        val failedCount = failedChunks.size + remainingPending.size
+                        val reason = "Lote Batch finalizado com falhas: $failedCount de ${updatedChunks.size} blocos não traduzidos."
+                        dao.updateJobStatus(job.id, JobStatus.FAILED, reason, finishTime)
+                    }
+                    return BatchRunResult.DONE
+                }
+
+                BatchJobState.FAILED,
+                BatchJobState.EXPIRED,
+                BatchJobState.CANCELLED -> {
+                    val finishTime = System.currentTimeMillis()
+                    val errorMsg = status.errorMessage
+                        ?: when (status.state) {
+                            BatchJobState.EXPIRED -> "Lote Batch expirado pelo provedor (janela de 24h excedida)."
+                            BatchJobState.CANCELLED -> "Lote Batch cancelado."
+                            else -> "Lote Batch falhou no provedor."
+                        }
+                    dao.updateJobStatus(job.id, JobStatus.FAILED, errorMsg, finishTime)
+                    return BatchRunResult.DONE
+                }
+            }
+        }
+    }
+
+    private suspend fun handleBatchProviderError(
+        jobId: Long,
+        dao: TranslationDao,
+        error: ProviderError,
+        now: Long = System.currentTimeMillis(),
+    ): BatchRunResult {
+        return when (error.kind) {
+            ErrorKind.NETWORK -> {
+                dao.updateJobStatus(jobId, JobStatus.WAITING_NETWORK, error.userMessage, now)
+                BatchRunResult.RETRY
+            }
+            ErrorKind.RATE_LIMIT -> {
+                dao.updateJobStatus(jobId, JobStatus.WAITING_RATE_LIMIT, error.userMessage, now)
+                BatchRunResult.RETRY
+            }
+            ErrorKind.INVALID_KEY -> {
+                dao.updateJobStatus(jobId, JobStatus.FAILED, error.userMessage, now)
+                BatchRunResult.DONE
+            }
+            else -> {
+                dao.updateJobStatus(jobId, JobStatus.FAILED, error.userMessage, now)
+                BatchRunResult.DONE
+            }
         }
     }
 
@@ -288,14 +544,15 @@ class TranslationWorker(
 
     private fun buildNotification(
         bookTitle: String,
+        statusText: String,
         done: Int,
         total: Int,
         jobId: Long,
+        ongoing: Boolean = true,
     ): Notification {
         val safeTotal = total.coerceAtLeast(0)
         val safeDone = done.coerceIn(0, if (safeTotal > 0) safeTotal else 0)
-        val percent = if (safeTotal > 0) (safeDone * 100) / safeTotal else 0
-        val contentText = "$safeDone / $safeTotal blocos · $percent%"
+        val indeterminate = safeTotal == 0
 
         val pauseIntent = Intent(applicationContext, PauseActionReceiver::class.java).apply {
             putExtra(PauseActionReceiver.EXTRA_JOB_ID, jobId)
@@ -309,10 +566,10 @@ class TranslationWorker(
 
         return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setContentTitle(bookTitle)
-            .setContentText(contentText)
+            .setContentText(statusText)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setProgress(safeTotal, safeDone, false)
-            .setOngoing(true)
+            .setProgress(safeTotal, safeDone, indeterminate)
+            .setOngoing(ongoing)
             .setOnlyAlertOnce(true)
             .addAction(
                 android.R.drawable.ic_media_pause,
@@ -320,6 +577,20 @@ class TranslationWorker(
                 pausePendingIntent
             )
             .build()
+    }
+
+    private fun buildNotification(
+        bookTitle: String,
+        done: Int,
+        total: Int,
+        jobId: Long,
+        ongoing: Boolean = true,
+    ): Notification {
+        val safeTotal = total.coerceAtLeast(0)
+        val safeDone = done.coerceIn(0, if (safeTotal > 0) safeTotal else 0)
+        val percent = if (safeTotal > 0) (safeDone * 100) / safeTotal else 0
+        val contentText = "$safeDone / $safeTotal blocos · $percent%"
+        return buildNotification(bookTitle, contentText, safeDone, safeTotal, jobId, ongoing)
     }
 
     private fun createForegroundInfo(
@@ -335,6 +606,11 @@ class TranslationWorker(
             notification,
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         )
+    }
+
+    private enum class BatchRunResult {
+        DONE,
+        RETRY,
     }
 
     companion object {

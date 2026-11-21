@@ -75,7 +75,10 @@ data class NewTranslationState(
     val seriesList: List<SeriesSummary> = emptyList(),
     val selectedSeriesId: Long? = null,
     val seriesSelectionInitialized: Boolean = false,
+    val useBatchMode: Boolean = false,
 ) {
+    val supportsBatch: Boolean
+        get() = provider in listOf(Provider.OPENAI, Provider.ANTHROPIC, Provider.GEMINI)
     val selectedSeries: SeriesSummary?
         get() = seriesList.firstOrNull { it.series.id == selectedSeriesId }
     val sample: Chunk? get() = chunks?.let { if (it.isEmpty()) null else sampleChunk(it) }
@@ -198,6 +201,10 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
         _state.update { it.copy(selectedSeriesId = seriesId, seriesSelectionInitialized = true) }
     }
 
+    fun setUseBatchMode(enabled: Boolean) {
+        _state.update { it.copy(useBatchMode = enabled) }
+    }
+
     fun setBudget(text: String) = _state.update { it.copy(budget = text.filter(Char::isDigit).take(12)) }
 
     /** Asks for consent the first time a provider would receive book text; otherwise sends the sample. */
@@ -307,6 +314,7 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
                         glossaryVersion = glossaryVersion,
                         glossarySnapshot = glossarySnapshot,
                         styleNotesSnapshot = styleNotesSnapshot,
+                        executionMode = if (s.useBatchMode && s.supportsBatch) "BATCH" else "SYNC",
                     )
 
                     val chunkEntities = chunks.mapIndexed { index, chunk ->

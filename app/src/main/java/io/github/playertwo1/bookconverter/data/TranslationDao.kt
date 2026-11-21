@@ -26,6 +26,8 @@ data class JobWithBook(
     val failureReason: String? get() = job.failureReason
     val createdAt: Long get() = job.createdAt
     val updatedAt: Long get() = job.updatedAt
+    val executionMode: String get() = job.executionMode
+    val remoteBatchId: String? get() = job.remoteBatchId
 }
 
 @Dao
@@ -52,15 +54,16 @@ interface TranslationDao {
         ORDER BY 
             CASE TranslationJob.status
                 WHEN 'RUNNING' THEN 1
-                WHEN 'WAITING_NETWORK' THEN 2
-                WHEN 'WAITING_RATE_LIMIT' THEN 3
-                WHEN 'PAUSED_BUDGET' THEN 4
-                WHEN 'QUEUED' THEN 5
-                WHEN 'PAUSED' THEN 6
-                WHEN 'FAILED' THEN 7
-                WHEN 'CANCELLED' THEN 8
-                WHEN 'COMPLETED' THEN 9
-                ELSE 10
+                WHEN 'WAITING_BATCH' THEN 2
+                WHEN 'WAITING_NETWORK' THEN 3
+                WHEN 'WAITING_RATE_LIMIT' THEN 4
+                WHEN 'PAUSED_BUDGET' THEN 5
+                WHEN 'QUEUED' THEN 6
+                WHEN 'PAUSED' THEN 7
+                WHEN 'FAILED' THEN 8
+                WHEN 'CANCELLED' THEN 9
+                WHEN 'COMPLETED' THEN 10
+                ELSE 11
             END,
             TranslationJob.createdAt ASC
     """)
@@ -74,14 +77,15 @@ interface TranslationDao {
 
     @Query("""
         SELECT * FROM TranslationJob 
-        WHERE status IN ('RUNNING', 'WAITING_NETWORK', 'WAITING_RATE_LIMIT', 'QUEUED')
+        WHERE status IN ('RUNNING', 'WAITING_BATCH', 'WAITING_NETWORK', 'WAITING_RATE_LIMIT', 'QUEUED')
         ORDER BY 
             CASE status
                 WHEN 'RUNNING' THEN 1
-                WHEN 'WAITING_NETWORK' THEN 2
-                WHEN 'WAITING_RATE_LIMIT' THEN 3
-                WHEN 'QUEUED' THEN 4
-                ELSE 5
+                WHEN 'WAITING_BATCH' THEN 2
+                WHEN 'WAITING_NETWORK' THEN 3
+                WHEN 'WAITING_RATE_LIMIT' THEN 4
+                WHEN 'QUEUED' THEN 5
+                ELSE 6
             END,
             createdAt ASC
         LIMIT 1
@@ -90,6 +94,9 @@ interface TranslationDao {
 
     @Query("UPDATE TranslationJob SET status = :status, failureReason = :failureReason, updatedAt = :updatedAt WHERE id = :jobId")
     suspend fun updateJobStatus(jobId: Long, status: String, failureReason: String?, updatedAt: Long)
+
+    @Query("UPDATE TranslationJob SET remoteBatchId = :remoteBatchId, status = :status, updatedAt = :updatedAt WHERE id = :jobId")
+    suspend fun updateJobBatchId(jobId: Long, remoteBatchId: String?, status: String, updatedAt: Long)
 
     @Query("UPDATE TranslationJob SET effort = :effort, updatedAt = :updatedAt WHERE id = :jobId")
     suspend fun updateJobEffort(jobId: Long, effort: String?, updatedAt: Long)
@@ -158,6 +165,18 @@ interface TranslationDao {
         syncJobProgress(jobId, updatedAt)
     }
 
+    @Transaction
+    suspend fun markBatchChunkCompleted(
+        jobId: Long,
+        chunkId: Long,
+        translatedText: String,
+        inputTokens: Long,
+        outputTokens: Long,
+        updatedAt: Long,
+    ) {
+        markChunkCompletedAndSyncJob(jobId, chunkId, translatedText, inputTokens, outputTokens, updatedAt)
+    }
+
     @Query("""
         UPDATE TranslationChunk 
         SET status = 'COMPLETED', 
@@ -188,6 +207,9 @@ interface TranslationDao {
 
     @Query("SELECT * FROM TranslationChunk WHERE jobId = :jobId ORDER BY chunkIndex ASC")
     suspend fun chunksForJob(jobId: Long): List<TranslationChunk>
+
+    @Query("SELECT * FROM TranslationChunk WHERE jobId = :jobId AND status = 'PENDING' ORDER BY chunkIndex ASC")
+    suspend fun pendingChunksForJob(jobId: Long): List<TranslationChunk>
 
     @Query("SELECT * FROM TranslationChunk WHERE jobId = :jobId ORDER BY chunkIndex ASC")
     fun observeChunksForJob(jobId: Long): Flow<List<TranslationChunk>>

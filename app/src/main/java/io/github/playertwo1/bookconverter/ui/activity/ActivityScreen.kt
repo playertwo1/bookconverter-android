@@ -243,7 +243,15 @@ private fun ActiveJobCard(
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
-                StatusBadge(status = job.status)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (job.executionMode == "BATCH") {
+                        BatchPill()
+                    }
+                    StatusBadge(status = job.status)
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -284,6 +292,14 @@ private fun ActiveJobCard(
 
             // Alert banner if waiting or paused budget
             when (job.status) {
+                JobStatus.WAITING_BATCH -> {
+                    Spacer(Modifier.height(12.dp))
+                    AlertBanner(
+                        message = "Lote enviado para processamento econômico na nuvem. Você pode fechar o app; a fila verifica automaticamente.",
+                        containerColor = AccentSoft,
+                        contentColor = Accent,
+                    )
+                }
                 JobStatus.WAITING_NETWORK -> {
                     Spacer(Modifier.height(12.dp))
                     AlertBanner(
@@ -318,6 +334,7 @@ private fun ActiveJobCard(
             ) {
                 when (job.status) {
                     JobStatus.RUNNING,
+                    JobStatus.WAITING_BATCH,
                     JobStatus.WAITING_NETWORK,
                     JobStatus.WAITING_RATE_LIMIT -> {
                         Button(
@@ -448,11 +465,19 @@ private fun QueuedJobCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    "${job.provider} · ${job.modelId} · ${count(job.blockTotal)} blocos",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        "${job.provider} · ${job.modelId} · ${count(job.blockTotal)} blocos",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                    if (job.executionMode == "BATCH") {
+                        BatchPill()
+                    }
+                }
             }
 
             Spacer(Modifier.width(8.dp))
@@ -503,7 +528,15 @@ private fun HistoryJobCard(
                         Text(it, color = TextSecondary, fontSize = 12.sp)
                     }
                 }
-                StatusBadge(status = job.status)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (job.executionMode == "BATCH") {
+                        BatchPill()
+                    }
+                    StatusBadge(status = job.status)
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -513,6 +546,13 @@ private fun HistoryJobCard(
                     Text(
                         "${count(job.blockTotal)} blocos concluídos · ${count(totalTokens)} tokens",
                         color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                JobStatus.WAITING_BATCH -> {
+                    Text(
+                        "Lote enviado para processamento econômico na nuvem. Você pode fechar o app; a fila verifica automaticamente.",
+                        color = Accent,
                         fontSize = 12.sp,
                     )
                 }
@@ -588,6 +628,7 @@ private fun HistoryJobCard(
 private fun StatusBadge(status: String) {
     val (label, bg, fg) = when (status) {
         JobStatus.RUNNING -> Triple("Traduzindo…", AccentSoft, Accent)
+        JobStatus.WAITING_BATCH -> Triple("Aguardando Batch", AccentSoft, Accent)
         JobStatus.WAITING_NETWORK -> Triple("Sem conexão", WarningSoft, WarningText)
         JobStatus.WAITING_RATE_LIMIT -> Triple("Aguardando API", WarningSoft, WarningText)
         JobStatus.PAUSED -> Triple("Pausado", Field, TextSecondary)
@@ -616,17 +657,40 @@ private fun StatusBadge(status: String) {
 }
 
 @Composable
-private fun AlertBanner(message: String, isWarning: Boolean) {
+private fun BatchPill() {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(AccentSoft)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "Batch",
+            color = Accent,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun AlertBanner(
+    message: String,
+    isWarning: Boolean = false,
+    containerColor: Color = if (isWarning) WarningSoft else DangerSoft,
+    contentColor: Color = if (isWarning) WarningText else Danger,
+) {
     Box(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (isWarning) WarningSoft else DangerSoft)
+            .background(containerColor)
             .padding(12.dp),
     ) {
         Text(
             text = message,
-            color = if (isWarning) WarningText else Danger,
+            color = contentColor,
             fontSize = 12.sp,
             lineHeight = 16.sp,
         )

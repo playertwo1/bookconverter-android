@@ -1,5 +1,6 @@
 package io.github.playertwo1.bookconverter.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -9,6 +10,7 @@ object JobStatus {
     const val QUEUED = "QUEUED"
     const val RUNNING = "RUNNING"
     const val PAUSED = "PAUSED"
+    const val WAITING_BATCH = "WAITING_BATCH"
     const val WAITING_NETWORK = "WAITING_NETWORK"
     const val WAITING_RATE_LIMIT = "WAITING_RATE_LIMIT"
     const val PAUSED_BUDGET = "PAUSED_BUDGET"
@@ -58,4 +60,7 @@ data class TranslationJob(
     val glossaryVersion: Int? = null,
     val glossarySnapshot: String? = null,
     val styleNotesSnapshot: String? = null,
+    @ColumnInfo(defaultValue = "'SYNC'")
+    val executionMode: String = "SYNC",
+    val remoteBatchId: String? = null,
 )

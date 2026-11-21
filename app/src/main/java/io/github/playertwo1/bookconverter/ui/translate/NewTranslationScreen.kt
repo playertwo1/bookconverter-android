@@ -43,6 +43,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface as M3Surface
@@ -319,6 +321,43 @@ fun NewTranslationScreen(
                     fontSize = 12.sp,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+
+                Card(
+                    modifier = Modifier.padding(top = 16.dp),
+                    onClick = if (state.supportsBatch) { { vm.setUseBatchMode(!state.useBatchMode) } } else null,
+                ) {
+                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text(
+                            "Modo econômico (Batch API)",
+                            color = if (state.supportsBatch) TextPrimary else TextSecondary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Custo menor em lote assíncrono (até 24h). Disponível apenas com chave API (OpenAI, Anthropic, Gemini).",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    Switch(
+                        checked = state.useBatchMode && state.supportsBatch,
+                        onCheckedChange = if (state.supportsBatch) { { vm.setUseBatchMode(it) } } else null,
+                        enabled = state.supportsBatch,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = TextPrimary,
+                            checkedTrackColor = Accent,
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = Field,
+                            disabledCheckedTrackColor = Accent.copy(alpha = 0.5f),
+                            disabledUncheckedTrackColor = Field.copy(alpha = 0.5f),
+                            disabledUncheckedThumbColor = TextTertiary,
+                        ),
+                        modifier = Modifier.semantics {
+                            contentDescription = "Modo econômico (Batch API)"
+                        },
+                    )
+                }
             }
 
             SectionTitle("Prévia e custo estimado")
