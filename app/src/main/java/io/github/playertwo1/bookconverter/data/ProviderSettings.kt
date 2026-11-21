@@ -121,9 +121,13 @@ class ProviderSettings(context: Context) {
     fun lastModel(p: Provider): String? = prefs.getString("last.model.$p", null)
     fun setLastModel(p: Provider, model: String) = prefs.edit().putString("last.model.$p", model).apply()
 
-    fun client(p: Provider): ProviderClient? =
-        if (p == Provider.CHATGPT) chatGptTokens()?.let { ChatGptClient(::chatGptAccessToken) }
-        else key(p)?.let { providerClient(p, it, baseUrl(p)) }
+    fun client(p: Provider): ProviderClient? = when (p) {
+        Provider.CHATGPT -> chatGptTokens()?.let { ChatGptClient(::chatGptAccessToken) }
+        Provider.OPENAI,
+        Provider.ANTHROPIC,
+        Provider.GEMINI,
+        Provider.OPENROUTER -> key(p)?.let { providerClient(p, it, baseUrl(p)) }
+    }
 
     private fun secretKey(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -154,6 +158,7 @@ val Provider.label get() = when (this) {
     Provider.CHATGPT -> "ChatGPT (seu plano)"
     Provider.ANTHROPIC -> "Anthropic / Claude"
     Provider.GEMINI -> "Google Gemini"
+    Provider.OPENROUTER -> "OpenRouter / Genérico"
 }
 
 val Provider.shortLabel get() = when (this) {
@@ -161,6 +166,7 @@ val Provider.shortLabel get() = when (this) {
     Provider.CHATGPT -> "ChatGPT"
     Provider.ANTHROPIC -> "Claude"
     Provider.GEMINI -> "Gemini"
+    Provider.OPENROUTER -> "OpenRouter"
 }
 
 /** Default endpoint, shown as the hint of the base-URL field. */
@@ -168,10 +174,12 @@ val Provider.defaultBase get() = when (this) {
     Provider.OPENAI, Provider.CHATGPT -> "https://api.openai.com/v1"
     Provider.ANTHROPIC -> "https://api.anthropic.com"
     Provider.GEMINI -> "https://generativelanguage.googleapis.com/v1beta"
+    Provider.OPENROUTER -> "https://openrouter.ai/api/v1"
 }
 
 val Provider.privacyUrl get() = when (this) {
     Provider.OPENAI, Provider.CHATGPT -> "https://openai.com/policies/row-privacy-policy/"
     Provider.ANTHROPIC -> "https://www.anthropic.com/legal/privacy"
     Provider.GEMINI -> "https://ai.google.dev/gemini-api/terms"
+    Provider.OPENROUTER -> "https://openrouter.ai/privacy"
 }

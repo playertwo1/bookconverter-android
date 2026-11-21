@@ -10,12 +10,16 @@ import io.github.playertwo1.bookconverter.core.epub.ExportValidationReport
 import io.github.playertwo1.bookconverter.core.epub.EpubExporter
 import io.github.playertwo1.bookconverter.core.provider.ErrorKind
 import io.github.playertwo1.bookconverter.core.provider.Provider
+import io.github.playertwo1.bookconverter.core.provider.ProviderClient
 import io.github.playertwo1.bookconverter.core.provider.ProviderError
+import io.github.playertwo1.bookconverter.core.provider.providerClient
 import io.github.playertwo1.bookconverter.core.translate.Glossary
 import io.github.playertwo1.bookconverter.core.translate.Prompt
+import io.github.playertwo1.bookconverter.core.translate.TextExporter
 import io.github.playertwo1.bookconverter.data.AppDatabase
 import io.github.playertwo1.bookconverter.data.Book
 import io.github.playertwo1.bookconverter.data.ChunkStatus
+import io.github.playertwo1.bookconverter.data.PdfExporter
 import io.github.playertwo1.bookconverter.data.ProviderSettings
 import io.github.playertwo1.bookconverter.data.TranslationJob
 import io.github.playertwo1.bookconverter.data.label
@@ -185,8 +189,20 @@ class ReviewExportViewModel(private val app: Application) : AndroidViewModel(app
                         ?: Provider.entries.firstOrNull { settings.hasKey(it) }
                         ?: error("Nenhum provedor configurado. Configure uma chave em Ajustes.")
 
-                    val client = settings.client(provider)
-                        ?: error("Credencial ausente ou sessão expirada para ${provider.label}")
+                    val client: ProviderClient = when (provider) {
+                        Provider.CHATGPT -> settings.client(Provider.CHATGPT)
+                        Provider.OPENROUTER -> {
+                            settings.client(Provider.OPENROUTER)
+                                ?: settings.key(Provider.OPENROUTER)?.let { key ->
+                                    providerClient(
+                                        Provider.OPENROUTER,
+                                        key,
+                                        settings.baseUrl(Provider.OPENROUTER),
+                                    )
+                                }
+                        }
+                        else -> settings.client(provider)
+                    } ?: error("Credencial ausente ou sessão expirada para ${provider.label}")
 
                     var model = currentJob.modelId.takeIf { it.isNotBlank() }
                         ?: settings.lastModel(provider)
@@ -195,6 +211,7 @@ class ReviewExportViewModel(private val app: Application) : AndroidViewModel(app
                             Provider.CHATGPT -> "gpt-4o"
                             Provider.ANTHROPIC -> "claude-3-5-haiku-20241022"
                             Provider.GEMINI -> "gemini-1.5-flash"
+                            Provider.OPENROUTER -> "openai/gpt-4o-mini"
                         }
 
                     val jobGlossary = Glossary.parseSnapshot(currentJob.glossarySnapshot)
@@ -393,6 +410,91 @@ class ReviewExportViewModel(private val app: Application) : AndroidViewModel(app
             }
             null
         }
+    }
+
+    fun exportBookAsDocx(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isExporting = true, errorMessage = null) }
+            try {
+                withContext(Dispatchers.IO) {
+                    val (fullText, bookTitle) = getFullBookTextAndTitle()
+                    val docxBytes = TextExporter.toDocx(fullText, bookTitle)
+                    app.contentResolver.openOutputStream(uri)?.use { outStream ->
+                        outStream.write(docxBytes)
+                    } ?: error("Falha ao abrir URI para gravação do DOCX")
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isExporting = false,
+                        statusMessage = "Livro exportado em DOCX com sucesso!",
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isExporting = false,
+                        errorMessage = "Falha ao salvar DOCX: ${e.message ?: e.javaClass.simpleName}",
+                    )
+                }
+            }
+        }
+    }
+
+    fun exportBookAsPdf(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isExporting = true, errorMessage = null) }
+            try {
+                withContext(Dispatchers.IO) {
+                    val (fullText, bookTitle) = getFullBookTextAndTitle()
+                    val pdfBytes = PdfExporter.toPdfBytes(fullText, bookTitle)
+                    app.contentResolver.openOutputStream(uri)?.use { outStream ->
+                        outStream.write(pdfBytes)
+                    } ?: error("Falha ao abrir URI para gravação do PDF")
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isExporting = false,
+                        statusMessage = "Livro exportado em PDF com sucesso!",
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isExporting = false,
+                        errorMessage = "Falha ao salvar PDF: ${e.message ?: e.javaClass.simpleName}",
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun getFullBookTextAndTitle(): Pair<String, String?> {
+        val book = _uiState.value.book ?: error("Livro não carregado")
+        val blocks = _uiState.value.blocks
+        val fullText = if (blocks.isNotEmpty()) {
+            blocks.joinToString("\n\n") { item ->
+                (item.translatedText?.takeIf { it.isNotBlank() } ?: item.originalText).trim()
+            }
+        } else {
+            val job = _uiState.value.job ?: error("Tradução não carregada")
+            val chunks = dao.chunksForJob(job.id)
+            val list = mutableListOf<String>()
+            for (chunk in chunks) {
+                val sourceBlocks = EpubExporter.decodeChunkBlocks(chunk.sourceText, chunk.blockCount)
+                val translatedBlocks = EpubExporter.decodeChunkBlocks(chunk.translatedText, chunk.blockCount)
+                val count = maxOf(1, chunk.blockCount)
+                for (blockIndex in 0 until count) {
+                    val original = sourceBlocks?.getOrNull(blockIndex) ?: chunk.sourceText
+                    val translated = translatedBlocks?.getOrNull(blockIndex)
+                    val text = translated?.takeIf { it.isNotBlank() } ?: original
+                    list.add(text.trim())
+                }
+            }
+            list.joinToString("\n\n")
+        }
+        return Pair(fullText, book.title.takeIf { it.isNotBlank() })
     }
 
     fun clearStatusMessage() {

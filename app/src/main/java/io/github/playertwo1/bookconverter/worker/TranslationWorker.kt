@@ -21,6 +21,7 @@ import io.github.playertwo1.bookconverter.core.provider.Provider
 import io.github.playertwo1.bookconverter.core.provider.ProviderClient
 import io.github.playertwo1.bookconverter.core.provider.ProviderError
 import io.github.playertwo1.bookconverter.core.provider.batchProviderClient
+import io.github.playertwo1.bookconverter.core.provider.providerClient
 import io.github.playertwo1.bookconverter.core.translate.Effort
 import io.github.playertwo1.bookconverter.core.translate.Glossary
 import io.github.playertwo1.bookconverter.core.translate.GlossaryTerm
@@ -119,7 +120,17 @@ class TranslationWorker(
 
                 val client: ProviderClient? = if (provider != null) {
                     try {
-                        providerSettings.client(provider)
+                        when (provider) {
+                            Provider.CHATGPT,
+                            Provider.OPENAI,
+                            Provider.ANTHROPIC,
+                            Provider.GEMINI -> providerSettings.client(provider)
+                            Provider.OPENROUTER -> {
+                                val apiKey = providerSettings.key(provider)
+                                val baseUrl = providerSettings.baseUrl(provider)
+                                if (apiKey != null) providerClient(Provider.OPENROUTER, apiKey, baseUrl) else null
+                            }
+                        }
                     } catch (e: Exception) {
                         null
                     }
@@ -326,6 +337,16 @@ class TranslationWorker(
                 job.id,
                 JobStatus.FAILED,
                 "O plano ChatGPT não suporta modo Batch. Use OpenAI com API Key.",
+                now
+            )
+            return BatchRunResult.DONE
+        }
+
+        if (provider == Provider.OPENROUTER) {
+            dao.updateJobStatus(
+                job.id,
+                JobStatus.FAILED,
+                "OpenRouter / Genérico não suporta modo Batch.",
                 now
             )
             return BatchRunResult.DONE

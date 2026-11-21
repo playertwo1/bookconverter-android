@@ -1,1 +1,0 @@
-C:\Users\notefael\projetos\bookconverter-android\whiting\app\src\main\cpp\CMakeLists.txt

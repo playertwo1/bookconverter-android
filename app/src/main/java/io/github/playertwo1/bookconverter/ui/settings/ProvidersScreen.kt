@@ -250,7 +250,7 @@ private fun ProviderFields(row: ProviderRow, vm: ProvidersViewModel) {
         modifier = Modifier.fillMaxWidth(),
     )
     Text(
-        "Para Cloudflare AI Gateway. OpenAI e Gemini incluem a versão (/v1, /v1beta); Anthropic não.",
+        "Para Cloudflare AI Gateway ou endpoints compatíveis. OpenAI, OpenRouter e Gemini incluem a versão (/v1, /v1beta); Anthropic não.",
         color = TextTertiary,
         fontSize = 12.sp,
         modifier = Modifier.padding(top = 4.dp),

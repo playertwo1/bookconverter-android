@@ -130,12 +130,17 @@ class TranslationEngine(
 
         val matchedGlossary = Glossary.matchTerms(chunk.sourceText, glossary)
         val matchedCharacters = Glossary.matchTerms(chunk.sourceText, characters)
+        val rankedPairs = if (examplePairs.isNotEmpty()) {
+          SeriesRag.rankRelevantPairs(chunk.sourceText, examplePairs, topK = 5)
+        } else {
+          emptyList()
+        }
         val promptToSend = Prompt.systemPrompt(
           glossary = matchedGlossary,
           styleNotes = styleNotes,
           basePrompt = systemPrompt,
           characters = matchedCharacters,
-          examplePairs = examplePairs,
+          examplePairs = rankedPairs,
         )
 
         val translation = try {

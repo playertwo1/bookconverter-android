@@ -125,6 +125,22 @@ fun ReviewExportScreen(
         }
     }
 
+    val createDocxLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    ) { uri ->
+        if (uri != null) {
+            vm.exportBookAsDocx(uri)
+        }
+    }
+
+    val createPdfLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        if (uri != null) {
+            vm.exportBookAsPdf(uri)
+        }
+    }
+
     val filteredBlocks = remember(uiState.blocks, filter) {
         when (filter) {
             ReviewFilter.TODOS -> uiState.blocks
@@ -305,6 +321,45 @@ fun ReviewExportScreen(
                                 enabled = !uiState.isExporting,
                             ) {
                                 Text("Compartilhar", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    createDocxLauncher.launch("$safeTitle-pt-BR.docx")
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .semantics { contentDescription = "Exportar DOCX" },
+                                border = BorderStroke(1.dp, Stroke),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                                shape = RoundedCornerShape(10.dp),
+                                enabled = !uiState.isExporting,
+                            ) {
+                                Text("Exportar DOCX", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    createPdfLauncher.launch("$safeTitle-pt-BR.pdf")
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .semantics { contentDescription = "Exportar PDF" },
+                                border = BorderStroke(1.dp, Stroke),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                                shape = RoundedCornerShape(10.dp),
+                                enabled = !uiState.isExporting,
+                            ) {
+                                Text("Exportar PDF", color = TextPrimary, fontWeight = FontWeight.SemiBold)
                             }
                         }
 

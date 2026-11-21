@@ -567,4 +567,5 @@ fun batchProviderClient(
   Provider.CHATGPT -> throw ProviderError(null, "Batch API não é suportada no plano ChatGPT", ErrorKind.PLAN_UNAVAILABLE)
   Provider.ANTHROPIC -> AnthropicBatchClient(apiKey, baseUrl, http)
   Provider.GEMINI -> GeminiBatchClient(apiKey, baseUrl, http)
+  Provider.OPENROUTER -> throw ProviderError(null, "Batch API não é suportada pelo OpenRouter / Genérico", ErrorKind.PLAN_UNAVAILABLE)
 }

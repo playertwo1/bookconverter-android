@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.playertwo1.bookconverter.core.provider.Provider
 import io.github.playertwo1.bookconverter.core.provider.ProviderClient
+import io.github.playertwo1.bookconverter.core.provider.providerClient
 import io.github.playertwo1.bookconverter.core.provider.translationModels
 import io.github.playertwo1.bookconverter.core.translate.Glossary
 import io.github.playertwo1.bookconverter.core.translate.GlossaryTerm
@@ -274,7 +275,17 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         val client: ProviderClient = try {
-            settings.client(provider)
+            when (provider) {
+                Provider.CHATGPT,
+                Provider.OPENAI,
+                Provider.ANTHROPIC,
+                Provider.GEMINI -> settings.client(provider)
+                Provider.OPENROUTER -> {
+                    val apiKey = settings.key(provider)
+                    val baseUrl = settings.baseUrl(provider)
+                    if (apiKey != null) providerClient(Provider.OPENROUTER, apiKey, baseUrl) else null
+                }
+            }
         } catch (_: Exception) {
             null
         } ?: run {
@@ -302,6 +313,7 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
                         Provider.CHATGPT -> "gpt-4o"
                         Provider.ANTHROPIC -> "claude-3-5-haiku-20241022"
                         Provider.GEMINI -> "gemini-1.5-flash"
+                        Provider.OPENROUTER -> "deepseek/deepseek-chat"
                     }
                     settings.setLastModel(provider, model)
                 }

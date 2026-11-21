@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import io.github.playertwo1.bookconverter.core.epub.Epub
 import io.github.playertwo1.bookconverter.core.provider.Provider
 import io.github.playertwo1.bookconverter.core.provider.ProviderError
+import io.github.playertwo1.bookconverter.core.provider.providerClient
 import io.github.playertwo1.bookconverter.core.provider.translationModels
 import io.github.playertwo1.bookconverter.core.translate.Chunk
 import io.github.playertwo1.bookconverter.core.translate.Estimate
@@ -78,7 +79,10 @@ data class NewTranslationState(
     val useBatchMode: Boolean = false,
 ) {
     val supportsBatch: Boolean
-        get() = provider in listOf(Provider.OPENAI, Provider.ANTHROPIC, Provider.GEMINI)
+        get() = when (provider) {
+            Provider.OPENAI, Provider.ANTHROPIC, Provider.GEMINI -> true
+            Provider.CHATGPT, Provider.OPENROUTER, null -> false
+        }
     val selectedSeries: SeriesSummary?
         get() = seriesList.firstOrNull { it.series.id == selectedSeriesId }
     val sample: Chunk? get() = chunks?.let { if (it.isEmpty()) null else sampleChunk(it) }
@@ -171,7 +175,17 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
             _state.update { it.copy(models = Models.Loading) }
             val result = withContext(Dispatchers.IO) {
                 try {
-                    val client = settings.client(p) ?: return@withContext Models.Failed("Chave não encontrada. Salve a chave de novo em Ajustes.")
+                    val client = when (p) {
+                        Provider.CHATGPT,
+                        Provider.OPENAI,
+                        Provider.ANTHROPIC,
+                        Provider.GEMINI -> settings.client(p)
+                        Provider.OPENROUTER -> {
+                            val apiKey = settings.key(p)
+                            val baseUrl = settings.baseUrl(p)
+                            if (apiKey != null) providerClient(Provider.OPENROUTER, apiKey, baseUrl) else null
+                        }
+                    } ?: return@withContext Models.Failed("Chave não encontrada. Salve a chave de novo em Ajustes.")
                     Models.Ready(translationModels(client.listModels()))
                 } catch (e: ProviderError) {
                     Models.Failed(e.userMessage)
@@ -232,7 +246,17 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
         viewModelScope.launch {
             val next = withContext(Dispatchers.IO) {
                 try {
-                    val client = settings.client(p) ?: return@withContext PreviewState.Failed("Chave não encontrada. Salve a chave de novo em Ajustes.")
+                    val client = when (p) {
+                        Provider.CHATGPT,
+                        Provider.OPENAI,
+                        Provider.ANTHROPIC,
+                        Provider.GEMINI -> settings.client(p)
+                        Provider.OPENROUTER -> {
+                            val apiKey = settings.key(p)
+                            val baseUrl = settings.baseUrl(p)
+                            if (apiKey != null) providerClient(Provider.OPENROUTER, apiKey, baseUrl) else null
+                        }
+                    } ?: return@withContext PreviewState.Failed("Chave não encontrada. Salve a chave de novo em Ajustes.")
                     val r = preview(client, model, s.effort, sample)
                     if (r.effortRejected && s.effort != null) settings.rejectEffort(p, model, s.effort)
                     PreviewState.Done(r, estimate(r, chunks))

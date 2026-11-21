@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -43,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.playertwo1.bookconverter.data.BackupManager
 import io.github.playertwo1.bookconverter.ui.theme.Accent
+import io.github.playertwo1.bookconverter.ui.theme.AccentSoft
+import io.github.playertwo1.bookconverter.ui.theme.AppThemeMode
 import io.github.playertwo1.bookconverter.ui.theme.Danger
 import io.github.playertwo1.bookconverter.ui.theme.Field
 import io.github.playertwo1.bookconverter.ui.theme.Positive
@@ -51,6 +54,7 @@ import io.github.playertwo1.bookconverter.ui.theme.Surface
 import io.github.playertwo1.bookconverter.ui.theme.TextPrimary
 import io.github.playertwo1.bookconverter.ui.theme.TextSecondary
 import io.github.playertwo1.bookconverter.ui.theme.TextTertiary
+import io.github.playertwo1.bookconverter.ui.theme.ThemePreferences
 import kotlinx.coroutines.launch
 
 @Composable
@@ -120,6 +124,73 @@ fun SettingsScreen(onOpenProviders: () -> Unit) {
                 Text("Chaves, URL base e conexão", color = TextSecondary, fontSize = 13.sp)
             }
             Text("›", color = TextSecondary, fontSize = 17.sp)
+        }
+
+        // Card Aparência (D5)
+        val currentThemeMode by ThemePreferences.themeMode.collectAsState()
+        Column(
+            Modifier
+                .padding(top = 16.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Surface)
+                .border(1.dp, Stroke, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+        ) {
+            Text(
+                "Aparência (D5)",
+                color = TextPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "Escolha o tema visual do aplicativo.",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+            )
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AppThemeMode.entries.forEach { mode ->
+                    val isSelected = currentThemeMode == mode
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isSelected) AccentSoft else Field)
+                            .border(
+                                1.dp,
+                                if (isSelected) Accent else Stroke,
+                                RoundedCornerShape(12.dp),
+                            )
+                            .clickable(role = Role.RadioButton) {
+                                ThemePreferences.setMode(context, mode)
+                            }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = mode.label,
+                            color = if (isSelected) TextPrimary else TextSecondary,
+                            fontSize = 15.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                        if (isSelected) {
+                            Text(
+                                text = "✓",
+                                color = Accent,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // Card Backup e restauração (AC16)

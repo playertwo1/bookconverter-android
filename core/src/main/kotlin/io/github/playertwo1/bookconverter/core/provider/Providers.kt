@@ -22,7 +22,13 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /** CHATGPT = OpenAI's Responses API paid by the user's ChatGPT plan through "Sign in with ChatGPT" (no API key). */
-enum class Provider { OPENAI, CHATGPT, ANTHROPIC, GEMINI }
+enum class Provider(val label: String, val defaultBaseUrl: String) {
+  OPENAI("OpenAI (chave de API)", "https://api.openai.com/v1"),
+  CHATGPT("ChatGPT (seu plano)", "https://chatgpt.com/backend-api"),
+  ANTHROPIC("Anthropic / Claude", "https://api.anthropic.com"),
+  GEMINI("Google Gemini", "https://generativelanguage.googleapis.com/v1beta"),
+  OPENROUTER("OpenRouter / Genérico", "https://openrouter.ai/api"),
+}
 
 data class Translation(val text: String, val model: String, val inputTokens: Long?, val outputTokens: Long?)
 
@@ -89,6 +95,7 @@ fun providerClient(provider: Provider, apiKey: String, baseUrl: String? = null):
   Provider.CHATGPT -> ChatGptClient({ apiKey }, baseUrl ?: ChatGptAuth.RESOURCE)
   Provider.GEMINI -> GeminiClient(apiKey, baseUrl ?: "https://generativelanguage.googleapis.com/v1beta")
   Provider.ANTHROPIC -> AnthropicClient(apiKey, baseUrl)
+  Provider.OPENROUTER -> OpenRouterClient(apiKey, baseUrl)
 }
 
 internal val http = OkHttpClient.Builder().readTimeout(10, TimeUnit.MINUTES).callTimeout(15, TimeUnit.MINUTES).build()
@@ -270,5 +277,112 @@ private class AnthropicClient(key: String, base: String?) : ProviderClient {
     throw ProviderError(e.statusCode(), e.message ?: "erro da API")
   } catch (e: com.anthropic.errors.AnthropicIoException) {
     throw ProviderError(null, "Falha de rede: ${e.message}")
+  }
+}
+
+class OpenRouterClient(
+  private val apiKey: String,
+  baseUrl: String? = null,
+  private val clientHttp: OkHttpClient = http,
+) : ProviderClient {
+  private val base = (baseUrl?.trim()?.takeIf { it.isNotEmpty() } ?: Provider.OPENROUTER.defaultBaseUrl).trimEnd('/')
+
+  private val chatUrl: String
+    get() = when {
+      base.endsWith("/chat/completions") -> base
+      base.endsWith("/v1") -> "$base/chat/completions"
+      else -> "$base/v1/chat/completions"
+    }
+
+  private val modelsUrl: String
+    get() = when {
+      base.endsWith("/models") -> base
+      base.endsWith("/v1") -> "$base/models"
+      else -> "$base/v1/models"
+    }
+
+  private fun req(url: String): Request.Builder {
+    return Request.Builder()
+      .url(url)
+      .header("Authorization", "Bearer $apiKey")
+      .header("HTTP-Referer", "https://github.com/playertwo1/bookconverter-android")
+      .header("X-Title", "BookConverter")
+  }
+
+  private fun executeCall(request: Request): JsonObject {
+    val response = try {
+      clientHttp.newCall(request).execute()
+    } catch (e: java.io.IOException) {
+      throw ProviderError(null, "Falha de rede: ${e.message}", ErrorKind.NETWORK)
+    }
+    response.use {
+      val body = it.body?.string().orEmpty()
+      if (!it.isSuccessful) {
+        throw ProviderError(it.code, body.take(500), classify(it.code, body))
+      }
+      return if (body.isNotBlank()) json.parseToJsonElement(body).jsonObject else JsonObject(emptyMap())
+    }
+  }
+
+  fun fetchModels(): List<String> {
+    val request = req(modelsUrl).get().build()
+    val r = executeCall(request)
+    val data = r["data"]?.jsonArray ?: return emptyList()
+    return data.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }.sorted()
+  }
+
+  override fun listModels(): List<String> = fetchModels()
+
+  override fun translate(model: String, system: String, text: String, effort: String?): Translation {
+    val body = buildJsonObject {
+      put("model", model)
+      putJsonArray("messages") {
+        addJsonObject {
+          put("role", "system")
+          put("content", system)
+        }
+        addJsonObject {
+          put("role", "user")
+          put("content", text)
+        }
+      }
+      if (effort != null) {
+        put("reasoning_effort", effort)
+      }
+    }
+
+    val request = req(chatUrl).post(body.toString().toRequestBody(JSON_TYPE)).build()
+    val r = executeCall(request)
+
+    val choices = r["choices"]?.jsonArray
+    val firstChoice = choices?.firstOrNull()?.jsonObject
+    val message = firstChoice?.get("message")?.jsonObject
+
+    val refusal = message?.get("refusal")?.jsonPrimitive?.content
+    if (!refusal.isNullOrBlank()) {
+      throw ProviderError(200, "Modelo recusou o trecho: $refusal", ErrorKind.REFUSED)
+    }
+
+    val finishReason = firstChoice?.get("finish_reason")?.jsonPrimitive?.content
+    if (finishReason in setOf("content_filter", "safety")) {
+      throw ProviderError(200, "Modelo recusou o trecho (filtro de conteúdo: $finishReason)", ErrorKind.REFUSED)
+    }
+
+    val out = message?.get("content")?.jsonPrimitive?.content.orEmpty()
+    if (out.isBlank()) {
+      throw ProviderError(200, "Resposta sem texto gerado (finish_reason: ${finishReason ?: "nenhum"})", ErrorKind.BAD_OUTPUT)
+    }
+
+    val usage = r["usage"]?.jsonObject
+    val inTokens = usage?.get("prompt_tokens")?.jsonPrimitive?.longOrNull
+    val outTokens = usage?.get("completion_tokens")?.jsonPrimitive?.longOrNull
+    val returnedModel = r["model"]?.jsonPrimitive?.content ?: model
+
+    return Translation(
+      text = out,
+      model = returnedModel,
+      inputTokens = inTokens,
+      outputTokens = outTokens,
+    )
   }
 }
