@@ -13,11 +13,33 @@ android {
     applicationId = "io.github.playertwo1.bookconverter"
     minSdk = 34
     targetSdk = 36
-    versionCode = 1
-    versionName = "0.1.0"
+    versionCode = 2
+    versionName = "1.0.0"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     ndk {
       abiFilters += listOf("arm64-v8a", "x86_64")
+    }
+  }
+
+  signingConfigs {
+    create("release") {
+      val ksPath = System.getenv("KEYSTORE_PATH")
+      if (!ksPath.isNullOrBlank()) {
+        storeFile = file(ksPath)
+        storePassword = System.getenv("KEYSTORE_PASSWORD")
+        keyAlias = System.getenv("KEY_ALIAS")
+        keyPassword = System.getenv("KEY_PASSWORD")
+      }
+    }
+  }
+
+  buildTypes {
+    release {
+      val ksPath = System.getenv("KEYSTORE_PATH")
+      if (!ksPath.isNullOrBlank()) {
+        signingConfig = signingConfigs.getByName("release")
+      }
+      isMinifyEnabled = false
     }
   }
 
