@@ -64,8 +64,9 @@ interface BookDao {
         TranslationChunk::class,
         Series::class,
         GlossaryEntry::class,
+        SeriesMemoryEntry::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -169,12 +170,38 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `SeriesMemoryEntry` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `seriesId` INTEGER NOT NULL,
+                        `category` TEXT NOT NULL,
+                        `sourceTerm` TEXT NOT NULL,
+                        `targetTerm` TEXT NOT NULL,
+                        `notes` TEXT,
+                        `excerpt` TEXT NOT NULL,
+                        `sourceBookTitle` TEXT NOT NULL,
+                        `conflictWarning` TEXT,
+                        `status` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        FOREIGN KEY(`seriesId`) REFERENCES `Series`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_SeriesMemoryEntry_seriesId` ON `SeriesMemoryEntry` (`seriesId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_SeriesMemoryEntry_seriesId_status` ON `SeriesMemoryEntry` (`seriesId`, `status`)")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 .also { instance = it }
         }

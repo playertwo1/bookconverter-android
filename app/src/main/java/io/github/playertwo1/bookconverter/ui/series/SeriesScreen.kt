@@ -33,6 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -53,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,13 +63,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.playertwo1.bookconverter.data.Book
 import io.github.playertwo1.bookconverter.data.GlossaryEntry
+import io.github.playertwo1.bookconverter.data.MemoryCategory
+import io.github.playertwo1.bookconverter.data.MemoryStatus
 import io.github.playertwo1.bookconverter.data.Series
+import io.github.playertwo1.bookconverter.data.SeriesMemoryEntry
 import io.github.playertwo1.bookconverter.data.SeriesSummary
 import io.github.playertwo1.bookconverter.ui.sizeLabel
 import io.github.playertwo1.bookconverter.ui.theme.Accent
 import io.github.playertwo1.bookconverter.ui.theme.AccentSoft
 import io.github.playertwo1.bookconverter.ui.theme.Danger
 import io.github.playertwo1.bookconverter.ui.theme.Field
+import io.github.playertwo1.bookconverter.ui.theme.Positive
 import io.github.playertwo1.bookconverter.ui.theme.Serif
 import io.github.playertwo1.bookconverter.ui.theme.Stroke
 import io.github.playertwo1.bookconverter.ui.theme.Surface
@@ -83,6 +89,9 @@ fun SeriesScreen(
     val selectedSeriesId by vm.selectedSeriesId.collectAsStateWithLifecycle()
     val selectedSeries by vm.selectedSeries.collectAsStateWithLifecycle()
     val selectedGlossary by vm.selectedGlossary.collectAsStateWithLifecycle()
+    val selectedMemoryEntries by vm.selectedMemoryEntries.collectAsStateWithLifecycle()
+    val isExtractingMemory by vm.isExtractingMemory.collectAsStateWithLifecycle()
+    val extractionProgress by vm.extractionProgress.collectAsStateWithLifecycle()
     val seriesList by vm.seriesList.collectAsStateWithLifecycle()
     val allBooks by vm.allBooks.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
@@ -94,6 +103,9 @@ fun SeriesScreen(
         SeriesDetailScreen(
             series = selectedSeries!!,
             glossary = selectedGlossary,
+            memoryEntries = selectedMemoryEntries,
+            isExtractingMemory = isExtractingMemory,
+            extractionProgress = extractionProgress,
             allBooks = allBooks,
             message = message,
             onDismissMessage = { vm.clearMessage() },
@@ -107,6 +119,12 @@ fun SeriesScreen(
             onDeleteTerm = { entryId -> vm.deleteGlossaryEntry(entryId, selectedSeries!!.id) },
             onImportTxt = { uri -> vm.importGlossaryTxt(selectedSeries!!.id, uri) },
             onExportTxt = { uri -> vm.exportGlossaryTxt(selectedSeries!!.id, uri) },
+            onExtractMemory = { book -> vm.extractMemoryFromBook(selectedSeries!!.id, book) },
+            onCancelExtraction = { vm.cancelMemoryExtraction() },
+            onApproveProposal = { entryId, editedTarget -> vm.approveProposal(entryId, editedTarget) },
+            onRejectProposal = { entryId -> vm.rejectProposal(entryId) },
+            onDeleteMemoryEntry = { entryId -> vm.deleteMemoryEntry(entryId) },
+            onUpdateMemoryEntry = { entryId, newTarget -> vm.updateMemoryEntry(entryId, newTarget) },
             modifier = modifier,
         )
     } else {
@@ -312,6 +330,9 @@ private fun SeriesCard(
 private fun SeriesDetailScreen(
     series: Series,
     glossary: List<GlossaryEntry>,
+    memoryEntries: List<SeriesMemoryEntry>,
+    isExtractingMemory: Boolean,
+    extractionProgress: String?,
     allBooks: List<Book>,
     message: String?,
     onDismissMessage: () -> Unit,
@@ -323,6 +344,12 @@ private fun SeriesDetailScreen(
     onDeleteTerm: (Long) -> Unit,
     onImportTxt: (Uri) -> Unit,
     onExportTxt: (Uri) -> Unit,
+    onExtractMemory: (Book) -> Unit,
+    onCancelExtraction: () -> Unit,
+    onApproveProposal: (Long, String?) -> Unit,
+    onRejectProposal: (Long) -> Unit,
+    onDeleteMemoryEntry: (Long) -> Unit,
+    onUpdateMemoryEntry: (Long, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showRenameDialog by rememberSaveable { mutableStateOf(false) }
@@ -330,6 +357,10 @@ private fun SeriesDetailScreen(
     var termToEdit by remember { mutableStateOf<GlossaryEntry?>(null) }
     var showAddTermDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteSeriesDialog by rememberSaveable { mutableStateOf(false) }
+
+    var showPickBookDialog by rememberSaveable { mutableStateOf(false) }
+    var entryToEdit by remember { mutableStateOf<SeriesMemoryEntry?>(null) }
+    var memoryFilter by rememberSaveable { mutableStateOf("PENDING") }
 
     var notesText by remember(series.id, series.styleNotes) { mutableStateOf(series.styleNotes) }
     val isNotesModified = notesText != series.styleNotes
@@ -393,6 +424,7 @@ private fun SeriesDetailScreen(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                 ) {
                     Text("Renomear", fontSize = 12.sp)
                 }
@@ -447,6 +479,7 @@ private fun SeriesDetailScreen(
                             enabled = isNotesModified,
                             colors = ButtonDefaults.buttonColors(containerColor = Accent),
                             shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                         ) {
                             Text("Salvar notas", fontSize = 13.sp)
                         }
@@ -490,6 +523,7 @@ private fun SeriesDetailScreen(
                             border = BorderStroke(1.dp, Stroke),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                         ) {
                             Text("+ Vincular", fontSize = 13.sp)
                         }
@@ -529,6 +563,7 @@ private fun SeriesDetailScreen(
                                     TextButton(
                                         onClick = { onToggleBook(book) },
                                         colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
+                                        modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                                     ) {
                                         Text("Desvincular", fontSize = 12.sp)
                                     }
@@ -687,6 +722,7 @@ private fun SeriesDetailScreen(
                                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                         TextButton(
                                             onClick = { termToEdit = entry },
+                                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                             colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
                                         ) {
@@ -701,6 +737,396 @@ private fun SeriesDetailScreen(
                                             colors = ButtonDefaults.textButtonColors(contentColor = Danger),
                                         ) {
                                             Text("✕", fontSize = 14.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Memória por IA (D2)
+        item {
+            val pendingCount = remember(memoryEntries) { memoryEntries.count { it.status == MemoryStatus.PENDING } }
+            val approvedCount = remember(memoryEntries) { memoryEntries.count { it.status == MemoryStatus.APPROVED } }
+            val allCount = memoryEntries.size
+
+            val filteredEntries = remember(memoryEntries, memoryFilter) {
+                when (memoryFilter) {
+                    "PENDING" -> memoryEntries.filter { it.status == MemoryStatus.PENDING }
+                    "APPROVED" -> memoryEntries.filter { it.status == MemoryStatus.APPROVED }
+                    else -> memoryEntries
+                }
+            }
+
+            M3Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                color = Surface,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Stroke),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "Memória por IA (D2)",
+                                fontFamily = Serif,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                color = TextPrimary,
+                            )
+                            Text(
+                                text = "Extraia termos, personagens e estilo de livros da biblioteca com IA.",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Button to extract
+                    Button(
+                        onClick = { showPickBookDialog = true },
+                        enabled = !isExtractingMemory,
+                        colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp),
+                    ) {
+                        Text(
+                            text = if (isExtractingMemory) "Extraindo com IA…" else "+ Extrair de um livro",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+
+                    // Progress indicator if extracting
+                    if (isExtractingMemory) {
+                        Spacer(Modifier.height(12.dp))
+                        M3Surface(
+                            color = Field,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Accent.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = Accent,
+                                    strokeWidth = 2.dp,
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = extractionProgress ?: "Analisando livro com IA…",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                TextButton(
+                                    onClick = onCancelExtraction,
+                                    colors = ButtonDefaults.textButtonColors(contentColor = Danger),
+                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                ) {
+                                    Text("Cancelar", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // Filters
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val filterOptions = listOf(
+                            "PENDING" to "Pendentes ($pendingCount)",
+                            "APPROVED" to "Aprovados ($approvedCount)",
+                            "ALL" to "Todos ($allCount)",
+                        )
+                        filterOptions.forEach { (key, label) ->
+                            val selected = memoryFilter == key
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (selected) AccentSoft else Field)
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (selected) Accent else Stroke,
+                                        shape = RoundedCornerShape(12.dp),
+                                    )
+                                    .clickable(
+                                        role = Role.RadioButton,
+                                        onClickLabel = "Filtrar por $label",
+                                        onClick = { memoryFilter = key },
+                                    )
+                                    .semantics { contentDescription = "Filtro $label" },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (selected) Accent else TextSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 4.dp),
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    if (filteredEntries.isEmpty()) {
+                        val emptyMsg = when {
+                            memoryEntries.isEmpty() -> "Nenhuma proposta de memória extraída ainda. Toque em \"+ Extrair de um livro\" para que a IA analise personagens, termos e estilo a partir de qualquer livro importado."
+                            memoryFilter == "PENDING" -> "Nenhuma proposta pendente de revisão."
+                            memoryFilter == "APPROVED" -> "Nenhuma proposta aprovada nesta série."
+                            else -> "Nenhuma entrada encontrada."
+                        }
+                        Text(
+                            text = emptyMsg,
+                            color = TextTertiary,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(vertical = 8.dp),
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            filteredEntries.forEach { entry ->
+                                M3Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = Field,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, Stroke),
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                    ) {
+                                        // Badges row
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(AccentSoft)
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = memoryCategoryLabel(entry.category),
+                                                    color = Accent,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                            }
+                                            val (statusBg, statusColor) = when (entry.status) {
+                                                MemoryStatus.APPROVED -> Color(0x2E35B77B) to Positive
+                                                MemoryStatus.REJECTED -> Color(0x2EF36D7A) to Danger
+                                                else -> Color(0x2EF59E0B) to Color(0xFFF59E0B)
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(statusBg)
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = memoryStatusLabel(entry.status),
+                                                    color = statusColor,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                            }
+                                            Spacer(Modifier.width(2.dp))
+                                            Text(
+                                                text = "· ${entry.sourceBookTitle}",
+                                                color = TextSecondary,
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
+
+                                        Spacer(Modifier.height(8.dp))
+
+                                        // Term mapping
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = entry.sourceTerm,
+                                                color = TextPrimary,
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                            Text(
+                                                text = " → ",
+                                                color = Accent,
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Bold,
+                                            )
+                                            Text(
+                                                text = entry.targetTerm,
+                                                color = TextPrimary,
+                                                fontSize = 15.sp,
+                                            )
+                                        }
+
+                                        if (!entry.notes.isNullOrBlank()) {
+                                            Text(
+                                                text = entry.notes,
+                                                color = TextSecondary,
+                                                fontSize = 12.sp,
+                                                modifier = Modifier.padding(top = 2.dp),
+                                            )
+                                        }
+
+                                        // Excerpt & Source Book
+                                        Spacer(Modifier.height(8.dp))
+                                        M3Surface(
+                                            color = Surface,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, Stroke),
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) {
+                                            Column(Modifier.padding(10.dp)) {
+                                                Text(
+                                                    text = "Trecho original em \"${entry.sourceBookTitle}\":",
+                                                    color = TextTertiary,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                )
+                                                Spacer(Modifier.height(3.dp))
+                                                Text(
+                                                    text = "“${entry.excerpt}”",
+                                                    color = TextSecondary,
+                                                    fontSize = 12.sp,
+                                                    fontStyle = FontStyle.Italic,
+                                                )
+                                            }
+                                        }
+
+                                        // Conflict Warning Banner
+                                        if (!entry.conflictWarning.isNullOrBlank()) {
+                                            Spacer(Modifier.height(8.dp))
+                                            M3Surface(
+                                                color = Danger.copy(alpha = 0.12f),
+                                                shape = RoundedCornerShape(8.dp),
+                                                border = BorderStroke(1.dp, Danger.copy(alpha = 0.45f)),
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                ) {
+                                                    Text("⚠", color = Danger, fontSize = 13.sp)
+                                                    Text(
+                                                        text = entry.conflictWarning,
+                                                        color = Danger,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // Action buttons (>= 48dp touch targets)
+                                        Spacer(Modifier.height(10.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            if (entry.status == MemoryStatus.PENDING) {
+                                                Button(
+                                                    onClick = { onApproveProposal(entry.id, null) },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Positive),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                ) {
+                                                    Text("Aprovar", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                                OutlinedButton(
+                                                    onClick = { entryToEdit = entry },
+                                                    border = BorderStroke(1.dp, Stroke),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                ) {
+                                                    Text("Editar", fontSize = 13.sp)
+                                                }
+                                                TextButton(
+                                                    onClick = { onRejectProposal(entry.id) },
+                                                    colors = ButtonDefaults.textButtonColors(contentColor = Danger),
+                                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                                ) {
+                                                    Text("Rejeitar", fontSize = 13.sp)
+                                                }
+                                            } else if (entry.status == MemoryStatus.APPROVED) {
+                                                OutlinedButton(
+                                                    onClick = { entryToEdit = entry },
+                                                    border = BorderStroke(1.dp, Stroke),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                ) {
+                                                    Text("Editar tradução", fontSize = 12.sp)
+                                                }
+                                            } else if (entry.status == MemoryStatus.REJECTED) {
+                                                OutlinedButton(
+                                                    onClick = { onApproveProposal(entry.id, null) },
+                                                    border = BorderStroke(1.dp, Positive),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Positive),
+                                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                ) {
+                                                    Text("Reconsiderar", fontSize = 12.sp)
+                                                }
+                                            }
+
+                                            Spacer(Modifier.weight(1f))
+
+                                            TextButton(
+                                                onClick = { onDeleteMemoryEntry(entry.id) },
+                                                modifier = Modifier
+                                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                                    .semantics { contentDescription = "Excluir proposta de memória" },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                                colors = ButtonDefaults.textButtonColors(contentColor = Danger),
+                                            ) {
+                                                Text("✕", fontSize = 14.sp)
+                                            }
                                         }
                                     }
                                 }
@@ -740,7 +1166,9 @@ private fun SeriesDetailScreen(
                         border = BorderStroke(1.dp, Danger),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp),
                     ) {
                         Text("Excluir série", fontSize = 14.sp)
                     }
@@ -799,6 +1227,32 @@ private fun SeriesDetailScreen(
                 onDeleteSeries(series.id)
             },
             onDismiss = { showDeleteSeriesDialog = false },
+        )
+    }
+
+    if (showPickBookDialog) {
+        PickBookForExtractionDialog(
+            allBooks = allBooks,
+            onSelectBook = { book ->
+                showPickBookDialog = false
+                onExtractMemory(book)
+            },
+            onDismiss = { showPickBookDialog = false },
+        )
+    }
+
+    entryToEdit?.let { entry ->
+        EditMemoryProposalDialog(
+            entry = entry,
+            onApproveWithEdit = { entryId, editedTarget ->
+                entryToEdit = null
+                onApproveProposal(entryId, editedTarget)
+            },
+            onUpdateOnly = { entryId, newTarget ->
+                entryToEdit = null
+                onUpdateMemoryEntry(entryId, newTarget)
+            },
+            onDismiss = { entryToEdit = null },
         )
     }
 }
@@ -914,6 +1368,7 @@ private fun CreateSeriesDialog(
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
                 shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
             ) {
                 Text("Criar")
             }
@@ -922,6 +1377,7 @@ private fun CreateSeriesDialog(
             TextButton(
                 onClick = onDismiss,
                 colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
             ) {
                 Text("Cancelar")
             }
@@ -984,6 +1440,7 @@ private fun RenameSeriesDialog(
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
                 shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
             ) {
                 Text("Salvar")
             }
@@ -992,6 +1449,7 @@ private fun RenameSeriesDialog(
             TextButton(
                 onClick = onDismiss,
                 colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
             ) {
                 Text("Cancelar")
             }
@@ -1040,6 +1498,7 @@ private fun LinkBooksDialog(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 48.dp)
                                     .padding(vertical = 4.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable { onToggleBook(book) }
@@ -1087,6 +1546,7 @@ private fun LinkBooksDialog(
                 onClick = onDismiss,
                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
                 shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
             ) {
                 Text("Concluir")
             }
@@ -1176,6 +1636,7 @@ private fun AddEditTermDialog(
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
                 shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
             ) {
                 Text("Salvar")
             }
@@ -1184,6 +1645,7 @@ private fun AddEditTermDialog(
             TextButton(
                 onClick = onDismiss,
                 colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
             ) {
                 Text("Cancelar")
             }
@@ -1220,6 +1682,7 @@ private fun DeleteSeriesDialog(
                 onClick = onConfirm,
                 colors = ButtonDefaults.buttonColors(containerColor = Danger, contentColor = TextPrimary),
                 shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
             ) {
                 Text("Excluir série")
             }
@@ -1228,11 +1691,271 @@ private fun DeleteSeriesDialog(
             TextButton(
                 onClick = onDismiss,
                 colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
             ) {
                 Text("Cancelar")
             }
         },
     )
+}
+
+@Composable
+private fun PickBookForExtractionDialog(
+    allBooks: List<Book>,
+    onSelectBook: (Book) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface,
+        title = {
+            Text(
+                text = "Extrair memória de um livro",
+                fontFamily = Serif,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+            )
+        },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                Text(
+                    text = "Escolha um livro da sua biblioteca (original, traduzido no PC ou em português) para extrair termos, personagens e estilo via IA:",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+                if (allBooks.isEmpty()) {
+                    Text(
+                        text = "Nenhum livro importado na biblioteca.",
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(vertical = 16.dp),
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        items(allBooks, key = { it.id }) { book ->
+                            M3Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable(
+                                        role = Role.Button,
+                                        onClickLabel = "Selecionar ${book.title}",
+                                        onClick = { onSelectBook(book) }
+                                    ),
+                                color = Field,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Stroke),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .defaultMinSize(minHeight = 56.dp)
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = book.title,
+                                            color = TextPrimary,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        val details = listOfNotNull(book.author, book.format, sizeLabel(book.sizeBytes))
+                                            .joinToString(" · ")
+                                        Text(
+                                            text = details,
+                                            color = TextSecondary,
+                                            fontSize = 12.sp,
+                                        )
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("›", color = Accent, fontSize = 20.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+            ) {
+                Text("Cancelar")
+            }
+        },
+    )
+}
+
+@Composable
+private fun EditMemoryProposalDialog(
+    entry: SeriesMemoryEntry,
+    onApproveWithEdit: (Long, String) -> Unit,
+    onUpdateOnly: (Long, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var target by rememberSaveable(entry.id) { mutableStateOf(entry.targetTerm) }
+    var showError by rememberSaveable { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface,
+        title = {
+            Text(
+                text = if (entry.status == MemoryStatus.PENDING) "Editar e aprovar proposta" else "Editar tradução",
+                fontFamily = Serif,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+            )
+        },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(AccentSoft)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = memoryCategoryLabel(entry.category),
+                            color = Accent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Text(
+                        text = entry.sourceBookTitle,
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Original: ${entry.sourceTerm}",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = target,
+                    onValueChange = {
+                        target = it
+                        showError = false
+                    },
+                    label = { Text("Tradução (pt-BR)") },
+                    singleLine = true,
+                    colors = seriesFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = showError && target.isBlank(),
+                )
+                if (showError) {
+                    Text(
+                        text = "A tradução não pode ficar vazia.",
+                        color = Danger,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                M3Surface(
+                    color = Field,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Stroke),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text(
+                            text = "Trecho original em \"${entry.sourceBookTitle}\":",
+                            color = TextTertiary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "“${entry.excerpt}”",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            fontStyle = FontStyle.Italic,
+                            maxLines = 5,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (entry.status == MemoryStatus.PENDING) {
+                Button(
+                    onClick = {
+                        if (target.isNotBlank()) {
+                            onApproveWithEdit(entry.id, target.trim())
+                        } else {
+                            showError = true
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Positive),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                ) {
+                    Text("Aprovar", fontWeight = FontWeight.SemiBold)
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (target.isNotBlank()) {
+                            onUpdateOnly(entry.id, target.trim())
+                        } else {
+                            showError = true
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                ) {
+                    Text("Salvar")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+            ) {
+                Text("Cancelar")
+            }
+        },
+    )
+}
+
+private fun memoryCategoryLabel(category: String): String = when (category) {
+    MemoryCategory.TERM -> "Termo"
+    MemoryCategory.CHARACTER -> "Personagem"
+    MemoryCategory.PAIR -> "Par EN↔PT"
+    else -> category
+}
+
+private fun memoryStatusLabel(status: String): String = when (status) {
+    MemoryStatus.PENDING -> "Pendente"
+    MemoryStatus.APPROVED -> "Aprovado"
+    MemoryStatus.REJECTED -> "Rejeitado"
+    else -> status
 }
 
 @Composable

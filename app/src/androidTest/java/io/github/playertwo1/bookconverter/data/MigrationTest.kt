@@ -30,7 +30,7 @@ class MigrationTest {
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, "migration-test-v1")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
             .build()
         runBlocking {
             assertEquals(1, db.books().all().first().size)
@@ -52,12 +52,13 @@ class MigrationTest {
         // Run migration and validate schema against 2.json
         helper.runMigrationsAndValidate(dbName, 2, true, AppDatabase.MIGRATION_1_2)
 
-        // Continue migration to 3 so Room database can open with current schema
+        // Continue migration to 3 and 4 so Room database can open with current schema
         helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_2_3)
+        helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
             .build()
 
         runBlocking {
@@ -166,9 +167,12 @@ class MigrationTest {
         // Validate migration to version 3 against 3.json
         helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_2_3)
 
+        // Continue migration to 4 so Room database can open with current schema
+        helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
+
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
             .build()
 
         runBlocking {
@@ -258,10 +262,11 @@ class MigrationTest {
         }
 
         helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+        helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
             .build()
 
         runBlocking {
@@ -269,6 +274,215 @@ class MigrationTest {
             assertEquals(1, books.size)
             assertEquals("Quincas Borba", books[0].title)
             assertEquals(null, books[0].seriesId)
+        }
+        db.close()
+    }
+
+    @Test
+    fun migration3To4PreservesDataAndEnablesMemory() {
+        val dbName = "migration-test-3-4"
+        helper.createDatabase(dbName, 3).apply {
+            execSQL(
+                "INSERT INTO Book (id, title, author, language, format, sha256, privatePath, sourceName, sizeBytes, importedAt, seriesId) " +
+                    "VALUES (1, 'Esaú e Jacó', 'Machado de Assis', 'pt', 'EPUB', 'sha_esau', '/data/esau.epub', 'esau.epub', 1024, 1000, 1)"
+            )
+            execSQL(
+                "INSERT INTO Series (id, name, styleNotes, glossaryVersion, createdAt, updatedAt) " +
+                    "VALUES (1, 'Fase Madura', 'Estilo realista', 1, 1000, 1000)"
+            )
+            execSQL(
+                "INSERT INTO GlossaryEntry (id, seriesId, sourceTerm, targetTerm, notes, updatedAt) " +
+                    "VALUES (1, 1, 'Natividade', 'Natividade', 'Mãe dos gêmeos', 1000)"
+            )
+            execSQL(
+                "INSERT INTO TranslationJob (id, bookId, status, provider, modelId, effort, tokenBudget, blockTotal, blockDone, inputTokens, outputTokens, failureReason, createdAt, updatedAt, seriesId, glossaryVersion, glossarySnapshot, styleNotesSnapshot) " +
+                    "VALUES (1, 1, 'QUEUED', 'OPENAI', 'gpt-4o', NULL, NULL, 5, 0, 0, 0, NULL, 1000, 1000, 1, 1, NULL, NULL)"
+            )
+            close()
+        }
+
+        // Validate migration to version 4 against 4.json
+        helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .build()
+
+        runBlocking {
+            // Verify existing v3 data preserved
+            val books = db.books().all().first()
+            assertEquals(1, books.size)
+            assertEquals("Esaú e Jacó", books[0].title)
+            assertEquals(1L, books[0].seriesId)
+
+            val series = db.series().byId(1)
+            assertNotNull(series)
+            assertEquals("Fase Madura", series?.name)
+
+            val glossary = db.series().glossaryForSeries(1)
+            assertEquals(1, glossary.size)
+            assertEquals("Natividade", glossary[0].sourceTerm)
+
+            val job = db.translations().jobById(1)
+            assertNotNull(job)
+            assertEquals(1L, job?.seriesId)
+
+            // Insert memory proposals
+            val entries = listOf(
+                SeriesMemoryEntry(
+                    seriesId = 1,
+                    category = MemoryCategory.TERM,
+                    sourceTerm = "Pedro",
+                    targetTerm = "Peter",
+                    notes = "Irmão gêmeo",
+                    excerpt = "Pedro e Paulo brigavam desde o ventre.",
+                    sourceBookTitle = "Esaú e Jacó",
+                    status = MemoryStatus.PENDING,
+                    createdAt = 2000L,
+                    updatedAt = 2000L,
+                ),
+                SeriesMemoryEntry(
+                    seriesId = 1,
+                    category = MemoryCategory.CHARACTER,
+                    sourceTerm = "Paulo",
+                    targetTerm = "Paul",
+                    notes = "Irmão gêmeo",
+                    excerpt = "Paulo pensava o oposto de Pedro.",
+                    sourceBookTitle = "Esaú e Jacó",
+                    status = MemoryStatus.PENDING,
+                    createdAt = 2000L,
+                    updatedAt = 2000L,
+                ),
+                SeriesMemoryEntry(
+                    seriesId = 1,
+                    category = MemoryCategory.PAIR,
+                    sourceTerm = "gêmeos",
+                    targetTerm = "twins",
+                    notes = null,
+                    excerpt = "Eram os dois gêmeos.",
+                    sourceBookTitle = "Esaú e Jacó",
+                    status = MemoryStatus.PENDING,
+                    createdAt = 2000L,
+                    updatedAt = 2000L,
+                )
+            )
+            db.series().insertMemoryEntries(entries)
+
+            // Test observeMemoryEntries
+            val memoryList = db.series().observeMemoryEntries(1).first()
+            assertEquals(3, memoryList.size)
+
+            val termEntry = memoryList.first { it.category == MemoryCategory.TERM }
+            val charEntry = memoryList.first { it.category == MemoryCategory.CHARACTER }
+            val pairEntry = memoryList.first { it.category == MemoryCategory.PAIR }
+
+            // Approve TERM proposal with editedTarget -> should update memory entry and sync with GlossaryEntry + bump glossaryVersion!
+            val approveTime = 3000L
+            db.series().approveMemoryProposal(termEntry.id, "Peter (Twin)", approveTime)
+
+            val updatedTermMemory = db.series().memoryEntryById(termEntry.id)
+            assertNotNull(updatedTermMemory)
+            assertEquals(MemoryStatus.APPROVED, updatedTermMemory?.status)
+            assertEquals("Peter (Twin)", updatedTermMemory?.targetTerm)
+            assertEquals(approveTime, updatedTermMemory?.updatedAt)
+
+            // Verify GlossaryEntry was created/upserted and glossaryVersion bumped
+            val updatedGlossary = db.series().glossaryForSeries(1)
+            assertEquals(2, updatedGlossary.size)
+            val syncedGlossaryTerm = updatedGlossary.find { it.sourceTerm == "Pedro" }
+            assertNotNull(syncedGlossaryTerm)
+            assertEquals("Peter (Twin)", syncedGlossaryTerm?.targetTerm)
+            assertEquals("Irmão gêmeo", syncedGlossaryTerm?.notes)
+
+            val updatedSeries = db.series().byId(1)
+            assertEquals(2, updatedSeries?.glossaryVersion)
+            assertEquals(approveTime, updatedSeries?.updatedAt)
+
+            // Approve CHARACTER proposal without editedTarget -> should use entry.targetTerm, but NOT insert into GlossaryEntry
+            val charApproveTime = 3500L
+            db.series().approveMemoryProposal(charEntry.id, null, charApproveTime)
+            val updatedCharMemory = db.series().memoryEntryById(charEntry.id)
+            assertEquals(MemoryStatus.APPROVED, updatedCharMemory?.status)
+            assertEquals("Paul", updatedCharMemory?.targetTerm)
+
+            val glossaryAfterChar = db.series().glossaryForSeries(1)
+            assertEquals(2, glossaryAfterChar.size) // unchanged term count
+
+            // Reject PAIR proposal
+            db.series().updateMemoryStatus(pairEntry.id, MemoryStatus.REJECTED, pairEntry.targetTerm, 4000L)
+            val updatedPair = db.series().memoryEntryById(pairEntry.id)
+            assertEquals(MemoryStatus.REJECTED, updatedPair?.status)
+
+            // Test approvedMemoryForSeries
+            val approvedOnly = db.series().approvedMemoryForSeries(1)
+            assertEquals(2, approvedOnly.size)
+
+            // Test deleteMemoryEntry
+            db.series().deleteMemoryEntry(pairEntry.id)
+            val memoryAfterDelete = db.series().observeMemoryEntries(1).first()
+            assertEquals(2, memoryAfterDelete.size)
+
+            // Test CASCADE on Series delete
+            db.series().deleteSeries(1)
+            val memoryAfterSeriesDelete = db.series().observeMemoryEntries(1).first()
+            assertEquals(0, memoryAfterSeriesDelete.size)
+        }
+        db.close()
+    }
+
+    @Test
+    fun migration1To4PreservesData() {
+        val dbName = "migration-test-1-4"
+        helper.createDatabase(dbName, 1).apply {
+            execSQL(
+                "INSERT INTO Book (id, title, author, language, format, sha256, privatePath, sourceName, sizeBytes, importedAt) " +
+                    "VALUES (1, 'Memorial de Aires', 'Machado de Assis', 'pt', 'EPUB', 'sha_aires', '/data/aires.epub', 'aires.epub', 1024, 1000)"
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .build()
+
+        runBlocking {
+            val books = db.books().all().first()
+            assertEquals(1, books.size)
+            assertEquals("Memorial de Aires", books[0].title)
+            assertEquals(null, books[0].seriesId)
+
+            val seriesId = db.series().insertSeries(
+                Series(
+                    name = "Última Fase",
+                    styleNotes = "Diário e memórias",
+                    glossaryVersion = 1,
+                    createdAt = 1000L,
+                    updatedAt = 1000L,
+                )
+            )
+            db.series().insertMemoryEntries(
+                listOf(
+                    SeriesMemoryEntry(
+                        seriesId = seriesId,
+                        category = MemoryCategory.CHARACTER,
+                        sourceTerm = "Conselheiro Aires",
+                        targetTerm = "Counselor Aires",
+                        notes = "Diplomata aposentado",
+                        excerpt = "O Conselheiro Aires escreveu em seu diário.",
+                        sourceBookTitle = "Memorial de Aires",
+                        status = MemoryStatus.PENDING,
+                        createdAt = 1000L,
+                        updatedAt = 1000L,
+                    )
+                )
+            )
+            val entries = db.series().observeMemoryEntries(seriesId).first()
+            assertEquals(1, entries.size)
+            assertEquals("Conselheiro Aires", entries[0].sourceTerm)
         }
         db.close()
     }

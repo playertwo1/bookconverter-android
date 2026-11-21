@@ -79,6 +79,8 @@ class TranslationEngine(
     systemPrompt: String = Prompt.SYSTEM,
     glossary: List<GlossaryTerm> = emptyList(),
     styleNotes: String? = null,
+    characters: List<GlossaryTerm> = emptyList(),
+    examplePairs: List<GlossaryTerm> = emptyList(),
     onProgress: suspend (JobProgress) -> Unit = {},
   ): JobOutcome {
     // AC08: Reconcile chunks stranded IN_PROGRESS from previous crashed/killed runs
@@ -126,12 +128,15 @@ class TranslationEngine(
 
         attemptsThisRun++
 
-        val matched = Glossary.matchTerms(chunk.sourceText, glossary)
-        val promptToSend = if (glossary.isNotEmpty() || !styleNotes.isNullOrBlank()) {
-          Prompt.systemPrompt(glossary = matched, styleNotes = styleNotes, basePrompt = systemPrompt)
-        } else {
-          systemPrompt
-        }
+        val matchedGlossary = Glossary.matchTerms(chunk.sourceText, glossary)
+        val matchedCharacters = Glossary.matchTerms(chunk.sourceText, characters)
+        val promptToSend = Prompt.systemPrompt(
+          glossary = matchedGlossary,
+          styleNotes = styleNotes,
+          basePrompt = systemPrompt,
+          characters = matchedCharacters,
+          examplePairs = examplePairs,
+        )
 
         val translation = try {
           try {

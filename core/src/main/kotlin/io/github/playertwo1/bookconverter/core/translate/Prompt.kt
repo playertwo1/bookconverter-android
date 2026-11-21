@@ -22,8 +22,10 @@ object Prompt {
     glossary: List<GlossaryTerm> = emptyList(),
     styleNotes: String? = null,
     basePrompt: String = SYSTEM,
+    characters: List<GlossaryTerm> = emptyList(),
+    examplePairs: List<GlossaryTerm> = emptyList(),
   ): String {
-    if (glossary.isEmpty() && styleNotes.isNullOrBlank()) {
+    if (glossary.isEmpty() && characters.isEmpty() && examplePairs.isEmpty() && styleNotes.isNullOrBlank()) {
       return basePrompt
     }
     val sb = StringBuilder(basePrompt)
@@ -31,6 +33,19 @@ object Prompt {
       sb.append("\n\nGlossário obrigatório (use exatamente estas traduções):\n")
       glossary.forEach { term ->
         sb.append("- ${term.source} → ${term.target}\n")
+      }
+    }
+    if (characters.isNotEmpty()) {
+      sb.append("\n\nPersonagens da série:\n")
+      characters.forEach { char ->
+        val noteSuffix = if (!char.notes.isNullOrBlank()) " (${char.notes.trim()})" else ""
+        sb.append("- ${char.source} → ${char.target}$noteSuffix\n")
+      }
+    }
+    if (examplePairs.isNotEmpty()) {
+      sb.append("\n\nExemplos de estilo EN↔PT:\n")
+      examplePairs.forEach { pair ->
+        sb.append("- \"${pair.source}\" → \"${pair.target}\"\n")
       }
     }
     if (!styleNotes.isNullOrBlank()) {

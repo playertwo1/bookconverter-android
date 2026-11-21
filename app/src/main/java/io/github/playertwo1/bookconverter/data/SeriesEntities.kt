@@ -47,6 +47,48 @@ data class GlossaryEntry(
     val updatedAt: Long,
 )
 
+object MemoryCategory {
+    const val TERM = "TERM"
+    const val CHARACTER = "CHARACTER"
+    const val PAIR = "PAIR"
+}
+
+object MemoryStatus {
+    const val PENDING = "PENDING"
+    const val APPROVED = "APPROVED"
+    const val REJECTED = "REJECTED"
+}
+
+@Entity(
+    tableName = "SeriesMemoryEntry",
+    foreignKeys = [
+        ForeignKey(
+            entity = Series::class,
+            parentColumns = ["id"],
+            childColumns = ["seriesId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index("seriesId"),
+        Index(value = ["seriesId", "status"])
+    ]
+)
+data class SeriesMemoryEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val seriesId: Long,
+    val category: String,
+    val sourceTerm: String,
+    val targetTerm: String,
+    val notes: String? = null,
+    val excerpt: String,
+    val sourceBookTitle: String,
+    val conflictWarning: String? = null,
+    val status: String = "PENDING",
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
 data class SeriesSummary(
     @Embedded val series: Series,
     val bookCount: Int,
@@ -131,5 +173,43 @@ interface SeriesDao {
             upsertGlossaryEntries(mapped)
         }
         bumpGlossaryVersion(seriesId, now)
+    }
+
+    @Query("SELECT * FROM SeriesMemoryEntry WHERE seriesId = :seriesId ORDER BY status ASC, updatedAt DESC")
+    fun observeMemoryEntries(seriesId: Long): Flow<List<SeriesMemoryEntry>>
+
+    @Query("SELECT * FROM SeriesMemoryEntry WHERE seriesId = :seriesId AND status = 'APPROVED' ORDER BY updatedAt DESC")
+    suspend fun approvedMemoryForSeries(seriesId: Long): List<SeriesMemoryEntry>
+
+    @Query("SELECT * FROM SeriesMemoryEntry WHERE id = :entryId")
+    suspend fun memoryEntryById(entryId: Long): SeriesMemoryEntry?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMemoryEntries(entries: List<SeriesMemoryEntry>)
+
+    @Query("UPDATE SeriesMemoryEntry SET status = :status, targetTerm = :targetTerm, updatedAt = :updatedAt WHERE id = :entryId")
+    suspend fun updateMemoryStatus(entryId: Long, status: String, targetTerm: String, updatedAt: Long)
+
+    @Query("DELETE FROM SeriesMemoryEntry WHERE id = :entryId")
+    suspend fun deleteMemoryEntry(entryId: Long)
+
+    @Transaction
+    suspend fun approveMemoryProposal(entryId: Long, editedTarget: String?, now: Long) {
+        val entry = memoryEntryById(entryId) ?: return
+        val finalTarget = editedTarget?.trim()?.takeIf { it.isNotEmpty() } ?: entry.targetTerm
+        updateMemoryStatus(entryId, MemoryStatus.APPROVED, finalTarget, now)
+        if (entry.category == MemoryCategory.TERM) {
+            val existing = glossaryForSeries(entry.seriesId).firstOrNull { it.sourceTerm == entry.sourceTerm }
+            val glossaryEntry = GlossaryEntry(
+                id = existing?.id ?: 0,
+                seriesId = entry.seriesId,
+                sourceTerm = entry.sourceTerm,
+                targetTerm = finalTarget,
+                notes = entry.notes ?: existing?.notes,
+                updatedAt = now,
+            )
+            upsertGlossaryEntry(glossaryEntry)
+            bumpGlossaryVersion(entry.seriesId, now)
+        }
     }
 }

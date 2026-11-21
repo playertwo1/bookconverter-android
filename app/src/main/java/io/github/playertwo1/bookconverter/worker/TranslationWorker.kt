@@ -17,6 +17,7 @@ import io.github.playertwo1.bookconverter.core.provider.Provider
 import io.github.playertwo1.bookconverter.core.provider.ProviderClient
 import io.github.playertwo1.bookconverter.core.translate.Effort
 import io.github.playertwo1.bookconverter.core.translate.Glossary
+import io.github.playertwo1.bookconverter.core.translate.GlossaryTerm
 import io.github.playertwo1.bookconverter.core.translate.JobOutcome
 import io.github.playertwo1.bookconverter.core.translate.JobProgress
 import io.github.playertwo1.bookconverter.core.translate.JobStatus as CoreJobStatus
@@ -25,6 +26,7 @@ import io.github.playertwo1.bookconverter.core.translate.TranslationEngine
 import io.github.playertwo1.bookconverter.core.translate.TranslationStore
 import io.github.playertwo1.bookconverter.data.AppDatabase
 import io.github.playertwo1.bookconverter.data.JobStatus
+import io.github.playertwo1.bookconverter.data.MemoryCategory
 import io.github.playertwo1.bookconverter.data.ProviderSettings
 import kotlinx.coroutines.CancellationException
 
@@ -199,6 +201,19 @@ class TranslationWorker(
                 }
 
                 val glossary = Glossary.parseSnapshot(job.glossarySnapshot)
+                val approvedMemory = if (job.seriesId != null) {
+                    db.series().approvedMemoryForSeries(job.seriesId)
+                } else {
+                    emptyList()
+                }
+                val characters = approvedMemory
+                    .filter { it.category == MemoryCategory.CHARACTER }
+                    .map { GlossaryTerm(it.sourceTerm, it.targetTerm, it.notes) }
+                val examplePairs = approvedMemory
+                    .filter { it.category == MemoryCategory.PAIR }
+                    .map { GlossaryTerm(it.sourceTerm, it.targetTerm, it.notes) }
+                    .take(5)
+
                 val outcome = try {
                     engine.runJob(
                         jobId = job.id,
@@ -209,6 +224,8 @@ class TranslationWorker(
                         store = store,
                         glossary = glossary,
                         styleNotes = job.styleNotesSnapshot,
+                        characters = characters,
+                        examplePairs = examplePairs,
                         onProgress = { progress ->
                             val notif = buildNotification(bookTitle, progress.done, progress.total, job.id)
                             notificationManager.notify(NOTIFICATION_ID, notif)

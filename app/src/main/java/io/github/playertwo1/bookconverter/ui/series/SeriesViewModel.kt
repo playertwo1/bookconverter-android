@@ -4,14 +4,26 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.playertwo1.bookconverter.core.provider.Provider
+import io.github.playertwo1.bookconverter.core.provider.ProviderClient
+import io.github.playertwo1.bookconverter.core.provider.translationModels
 import io.github.playertwo1.bookconverter.core.translate.Glossary
 import io.github.playertwo1.bookconverter.core.translate.GlossaryTerm
+import io.github.playertwo1.bookconverter.core.translate.SeriesMemoryExtractor
 import io.github.playertwo1.bookconverter.data.AppDatabase
 import io.github.playertwo1.bookconverter.data.Book
 import io.github.playertwo1.bookconverter.data.GlossaryEntry
+import io.github.playertwo1.bookconverter.data.MemoryCategory
+import io.github.playertwo1.bookconverter.data.MemoryStatus
+import io.github.playertwo1.bookconverter.data.ProviderSettings
 import io.github.playertwo1.bookconverter.data.Series
+import io.github.playertwo1.bookconverter.data.SeriesMemoryEntry
 import io.github.playertwo1.bookconverter.data.SeriesSummary
+import io.github.playertwo1.bookconverter.data.label
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -20,12 +32,15 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SeriesViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
     private val seriesDao = db.series()
     private val bookDao = db.books()
+    private val settings = ProviderSettings(app)
 
     val seriesList: StateFlow<List<SeriesSummary>> = seriesDao.observeAllSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -43,6 +58,18 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
     val selectedGlossary: StateFlow<List<GlossaryEntry>> = _selectedSeriesId.flatMapLatest { id ->
         if (id != null) seriesDao.observeGlossary(id) else flowOf(emptyList())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val selectedMemoryEntries: StateFlow<List<SeriesMemoryEntry>> = _selectedSeriesId.flatMapLatest { id ->
+        if (id != null) seriesDao.observeMemoryEntries(id) else flowOf(emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _isExtractingMemory = MutableStateFlow(false)
+    val isExtractingMemory: StateFlow<Boolean> = _isExtractingMemory.asStateFlow()
+
+    private val _extractionProgress = MutableStateFlow<String?>(null)
+    val extractionProgress: StateFlow<String?> = _extractionProgress.asStateFlow()
+
+    private var extractionJob: Job? = null
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
@@ -225,6 +252,176 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
                 _message.value = "Glossário exportado ($countMsg)."
             } catch (e: Exception) {
                 _message.value = "Erro na exportação: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun extractMemoryFromBook(seriesId: Long, book: Book) {
+        if (_isExtractingMemory.value) return
+
+        val file = File(book.privatePath)
+        if (!file.exists()) {
+            _message.value = "Arquivo do livro não encontrado: ${book.title}"
+            return
+        }
+
+        val provider = settings.lastProvider?.takeIf { settings.hasKey(it) }
+            ?: Provider.entries.firstOrNull { settings.hasKey(it) }
+
+        if (provider == null) {
+            _message.value = "Nenhum provedor configurado. Configure uma chave ou login em Ajustes."
+            return
+        }
+
+        val client: ProviderClient = try {
+            settings.client(provider)
+        } catch (_: Exception) {
+            null
+        } ?: run {
+            _message.value = "Credencial ausente ou expirada para ${provider.label}. Configure em Ajustes."
+            return
+        }
+
+        extractionJob?.cancel()
+        _isExtractingMemory.value = true
+        _extractionProgress.value = "Iniciando análise de \"${book.title}\"…"
+
+        extractionJob = viewModelScope.launch {
+            try {
+                var model = settings.lastModel(provider)
+                if (model.isNullOrBlank()) {
+                    val availableModels = withContext(Dispatchers.IO) {
+                        try {
+                            translationModels(client.listModels())
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                    model = availableModels.firstOrNull() ?: when (provider) {
+                        Provider.OPENAI -> "gpt-4o-mini"
+                        Provider.CHATGPT -> "gpt-4o"
+                        Provider.ANTHROPIC -> "claude-3-5-haiku-20241022"
+                        Provider.GEMINI -> "gemini-1.5-flash"
+                    }
+                    settings.setLastModel(provider, model)
+                }
+
+                val existingEntries = withContext(Dispatchers.IO) {
+                    seriesDao.glossaryForSeries(seriesId)
+                }
+                val existingTerms = existingEntries.map {
+                    GlossaryTerm(source = it.sourceTerm, target = it.targetTerm, notes = it.notes)
+                }
+
+                val result = withContext(Dispatchers.IO) {
+                    SeriesMemoryExtractor.extractFromEpub(
+                        epubFile = file,
+                        sourceBookTitle = book.title,
+                        client = client,
+                        model = model,
+                        effort = null,
+                        existingTerms = existingTerms,
+                        onProgress = { cur, tot ->
+                            _extractionProgress.value = "Analisando trecho $cur de $tot…"
+                        }
+                    )
+                }
+
+                val now = System.currentTimeMillis()
+                val entries = result.proposals.map { p ->
+                    SeriesMemoryEntry(
+                        seriesId = seriesId,
+                        category = p.category.name,
+                        sourceTerm = p.source,
+                        targetTerm = p.target,
+                        notes = p.notes,
+                        excerpt = p.excerpt,
+                        sourceBookTitle = p.sourceBookTitle,
+                        conflictWarning = p.conflictWarning,
+                        status = MemoryStatus.PENDING,
+                        createdAt = now,
+                        updatedAt = now,
+                    )
+                }
+
+                if (entries.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        seriesDao.insertMemoryEntries(entries)
+                    }
+                    val totalTokens = result.inputTokens + result.outputTokens
+                    val tokenInfo = if (totalTokens > 0) " (${totalTokens} tokens consumidos)" else ""
+                    _message.value = "Memória extraída: ${entries.size} proposta(s) gerada(s) a partir de \"${book.title}\"$tokenInfo."
+                } else {
+                    _message.value = "Nenhuma proposta de memória gerada a partir de \"${book.title}\"."
+                }
+            } catch (_: CancellationException) {
+                // Cancelled by user
+            } catch (e: Exception) {
+                _message.value = "Erro ao extrair memória: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                _isExtractingMemory.value = false
+                _extractionProgress.value = null
+            }
+        }
+    }
+
+    fun cancelMemoryExtraction() {
+        extractionJob?.cancel()
+        _isExtractingMemory.value = false
+        _extractionProgress.value = null
+        _message.value = "Extração de memória cancelada."
+    }
+
+    fun approveProposal(entryId: Long, editedTarget: String? = null) {
+        viewModelScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                seriesDao.approveMemoryProposal(entryId, editedTarget, now)
+                _message.value = "Proposta aprovada."
+            } catch (e: Exception) {
+                _message.value = "Erro ao aprovar proposta: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun rejectProposal(entryId: Long) {
+        viewModelScope.launch {
+            try {
+                val entry = seriesDao.memoryEntryById(entryId) ?: return@launch
+                val now = System.currentTimeMillis()
+                seriesDao.updateMemoryStatus(entryId, MemoryStatus.REJECTED, entry.targetTerm, now)
+                _message.value = "Proposta rejeitada."
+            } catch (e: Exception) {
+                _message.value = "Erro ao rejeitar proposta: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun deleteMemoryEntry(entryId: Long) {
+        viewModelScope.launch {
+            try {
+                seriesDao.deleteMemoryEntry(entryId)
+                _message.value = "Entrada removida."
+            } catch (e: Exception) {
+                _message.value = "Erro ao excluir entrada: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun updateMemoryEntry(entryId: Long, editedTarget: String) {
+        val trimmedTarget = editedTarget.trim()
+        if (trimmedTarget.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val entry = seriesDao.memoryEntryById(entryId) ?: return@launch
+                val now = System.currentTimeMillis()
+                seriesDao.updateMemoryStatus(entryId, entry.status, trimmedTarget, now)
+                if (entry.status == MemoryStatus.APPROVED && entry.category == MemoryCategory.TERM) {
+                    seriesDao.approveMemoryProposal(entryId, trimmedTarget, now)
+                }
+                _message.value = "Entrada atualizada."
+            } catch (e: Exception) {
+                _message.value = "Erro ao atualizar entrada: ${e.message ?: e.javaClass.simpleName}"
             }
         }
     }
