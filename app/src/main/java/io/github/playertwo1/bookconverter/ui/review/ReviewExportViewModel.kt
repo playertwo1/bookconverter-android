@@ -19,6 +19,7 @@ import io.github.playertwo1.bookconverter.core.translate.TextExporter
 import io.github.playertwo1.bookconverter.data.AppDatabase
 import io.github.playertwo1.bookconverter.data.Book
 import io.github.playertwo1.bookconverter.data.ChunkStatus
+import io.github.playertwo1.bookconverter.data.GoogleDriveSettings
 import io.github.playertwo1.bookconverter.data.PdfExporter
 import io.github.playertwo1.bookconverter.data.ProviderSettings
 import io.github.playertwo1.bookconverter.data.TranslationJob
@@ -221,7 +222,10 @@ class ReviewExportViewModel(private val app: Application) : AndroidViewModel(app
                         styleNotes = currentJob.styleNotesSnapshot,
                     )
 
-                    var effort = currentJob.effort
+                    val rejectedEfforts = settings.rejectedEfforts(provider, model)
+                    var effort = (currentJob.effort ?: "medium").takeUnless {
+                        rejectedEfforts.contains(it) || rejectedEfforts.contains("effort")
+                    }
                     val textToSend = "⟦1⟧\n$originalBlock"
 
                     val reply = try {
@@ -233,7 +237,9 @@ class ReviewExportViewModel(private val app: Application) : AndroidViewModel(app
                         )
                     } catch (e: ProviderError) {
                         if (e.kind == ErrorKind.EFFORT_REJECTED && effort != null) {
+                            val rejectedEffort = effort
                             effort = null
+                            settings.rejectEffort(provider, model, rejectedEffort)
                             settings.rejectEffort(provider, model, "effort")
                             client.translate(
                                 model = model,
@@ -464,6 +470,91 @@ class ReviewExportViewModel(private val app: Application) : AndroidViewModel(app
                     it.copy(
                         isExporting = false,
                         errorMessage = "Falha ao salvar PDF: ${e.message ?: e.javaClass.simpleName}",
+                    )
+                }
+            }
+        }
+    }
+
+    fun uploadToDrive(format: String = "EPUB") {
+        val driveSettings = GoogleDriveSettings(app)
+        if (!driveSettings.isConnected) {
+            _uiState.update { it.copy(errorMessage = "Conecte o Google Drive em Ajustes primeiro.") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isExporting = true, errorMessage = null) }
+            try {
+                val uploaded = withContext(Dispatchers.IO) {
+                    val book = _uiState.value.book ?: error("Livro não carregado")
+                    val job = _uiState.value.job ?: error("Tradução não carregada")
+                    val safeTitle = book.title
+                        .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                        .trim('_')
+                        .take(50)
+                        .ifBlank { "livro" }
+
+                    when (format.uppercase()) {
+                        "EPUB" -> {
+                            val chunks = dao.chunksForJob(job.id)
+                            val originalFile = File(book.privatePath)
+                            if (!originalFile.exists()) {
+                                error("Arquivo original não encontrado: ${book.privatePath}")
+                            }
+                            val chunkInputs = chunks.map { c ->
+                                ChunkTranslationInput(
+                                    spineIndex = c.spineIndex,
+                                    startBlockIndex = c.startBlockIndex,
+                                    endBlockIndex = c.endBlockIndex,
+                                    blockCount = c.blockCount,
+                                    translatedText = c.translatedText,
+                                )
+                            }
+                            val blockMap = EpubExporter.buildBlockMapFromChunks(originalFile, chunkInputs)
+                            val exportsDir = File(app.cacheDir, "exports").apply { mkdirs() }
+                            val tempOut = File(exportsDir, "tmp_drive_${System.currentTimeMillis()}.epub")
+                            try {
+                                EpubExporter.exportPtBr(originalFile, tempOut, blockMap)
+                                val bytes = tempOut.readBytes()
+                                val fileName = "$safeTitle-pt-BR.epub"
+                                driveSettings.uploadToConfiguredFolder(fileName, "application/epub+zip", bytes)
+                            } finally {
+                                tempOut.delete()
+                            }
+                        }
+                        "DOCX" -> {
+                            val (fullText, bookTitle) = getFullBookTextAndTitle()
+                            val bytes = TextExporter.toDocx(fullText, bookTitle)
+                            val fileName = "$safeTitle-pt-BR.docx"
+                            driveSettings.uploadToConfiguredFolder(
+                                fileName,
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                bytes,
+                            )
+                        }
+                        "PDF" -> {
+                            val (fullText, bookTitle) = getFullBookTextAndTitle()
+                            val bytes = PdfExporter.toPdfBytes(fullText, bookTitle)
+                            val fileName = "$safeTitle-pt-BR.pdf"
+                            driveSettings.uploadToConfiguredFolder(fileName, "application/pdf", bytes)
+                        }
+                        else -> error("Formato não suportado para Google Drive: $format")
+                    }
+                }
+
+                val folderName = driveSettings.selectedFolderName
+                _uiState.update {
+                    it.copy(
+                        isExporting = false,
+                        statusMessage = "Enviado para o Google Drive ($folderName): ${uploaded.name}",
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isExporting = false,
+                        errorMessage = "Falha ao enviar para o Google Drive: ${e.message ?: e.javaClass.simpleName}",
                     )
                 }
             }

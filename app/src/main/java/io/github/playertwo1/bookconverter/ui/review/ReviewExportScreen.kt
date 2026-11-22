@@ -363,6 +363,41 @@ fun ReviewExportScreen(
                             }
                         }
 
+                        Spacer(Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = { vm.uploadToDrive("EPUB") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .semantics { contentDescription = "Enviar EPUB para o Google Drive" },
+                                border = BorderStroke(1.dp, Stroke),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                                shape = RoundedCornerShape(10.dp),
+                                enabled = !uiState.isExporting,
+                            ) {
+                                Text("Enviar EPUB p/ Drive", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = { vm.uploadToDrive("PDF") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .semantics { contentDescription = "Enviar PDF para o Google Drive" },
+                                border = BorderStroke(1.dp, Stroke),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                                shape = RoundedCornerShape(10.dp),
+                                enabled = !uiState.isExporting,
+                            ) {
+                                Text("Enviar PDF p/ Drive", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            }
+                        }
+
                         // Validation Report Banner
                         uiState.exportReport?.let { report ->
                             Spacer(Modifier.height(14.dp))

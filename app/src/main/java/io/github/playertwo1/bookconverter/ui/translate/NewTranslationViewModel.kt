@@ -63,7 +63,7 @@ data class NewTranslationState(
     val models: Models = Models.Idle,
     val model: String? = null,
     /** null = provider default. */
-    val effort: String? = null,
+    val effort: String? = "medium",
     /** Levels the selected model refused before; shown as unavailable (AC06). */
     val rejectedEfforts: Set<String> = emptySet(),
     val preview: PreviewState = PreviewState.Idle,
@@ -163,7 +163,7 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
 
     fun selectProvider(p: Provider) {
         settings.lastProvider = p
-        _state.update { it.copy(provider = p, models = Models.Loading, model = null, effort = null, rejectedEfforts = emptySet(), preview = PreviewState.Idle) }
+        _state.update { it.copy(provider = p, models = Models.Loading, model = null, effort = "medium", rejectedEfforts = emptySet(), preview = PreviewState.Idle) }
         loadModels(p)
     }
 
@@ -203,7 +203,7 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
         val p = _state.value.provider ?: return
         settings.setLastModel(p, id)
         val rejected = settings.rejectedEfforts(p, id)
-        _state.update { it.copy(model = id, rejectedEfforts = rejected, effort = it.effort?.takeUnless { e -> e in rejected }, preview = PreviewState.Idle) }
+        _state.update { it.copy(model = id, rejectedEfforts = rejected, effort = (it.effort ?: "medium").takeUnless { e -> e in rejected }, preview = PreviewState.Idle) }
     }
 
     fun selectEffort(effort: String?) {

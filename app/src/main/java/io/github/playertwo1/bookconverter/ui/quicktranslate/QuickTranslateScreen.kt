@@ -484,6 +484,42 @@ fun QuickTranslateScreen(
                         },
                     )
                 }
+
+                var driveMenuExpanded by remember { mutableStateOf(false) }
+
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { driveMenuExpanded = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .semantics { contentDescription = "Enviar para o Google Drive" },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Stroke),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = Surface,
+                            contentColor = TextPrimary,
+                        ),
+                    ) {
+                        Text("Enviar p/ Drive ▾", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    DropdownMenu(
+                        expanded = driveMenuExpanded,
+                        onDismissRequest = { driveMenuExpanded = false },
+                        modifier = Modifier.background(Surface),
+                    ) {
+                        ExportFormat.entries.forEach { format ->
+                            DropdownMenuItem(
+                                text = { Text("Enviar ${format.label} ao Drive", color = TextPrimary) },
+                                onClick = {
+                                    driveMenuExpanded = false
+                                    viewModel.uploadToDrive(format)
+                                },
+                            )
+                        }
+                    }
+                }
             }
             Spacer(Modifier.height(32.dp))
         }
@@ -510,11 +546,8 @@ private fun ExportButton(
     }
 }
 
-private fun suggestedFileName(title: String, format: ExportFormat): String {
-    val base = title.trim().ifBlank { "traducao" }
-        .replace(Regex("""[\\/:*?"<>|]"""), "_")
-    return "$base.${format.extension}"
-}
+private fun suggestedFileName(title: String, format: ExportFormat): String =
+    QuickTranslateViewModel.suggestedFileName(title, format)
 
 @Composable
 private fun fieldColors() = OutlinedTextFieldDefaults.colors(

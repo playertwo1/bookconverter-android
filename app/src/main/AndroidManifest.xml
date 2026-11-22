@@ -9,6 +9,7 @@
 
     <application
         android:label="Bookconverter"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.Bookconverter">
 
         <activity

@@ -13,6 +13,8 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import io.github.playertwo1.bookconverter.core.epub.ChunkTranslationInput
+import io.github.playertwo1.bookconverter.core.epub.EpubExporter
 import io.github.playertwo1.bookconverter.core.provider.BatchJobState
 import io.github.playertwo1.bookconverter.core.provider.BatchProviderClient
 import io.github.playertwo1.bookconverter.core.provider.BatchRequestItem
@@ -33,12 +35,14 @@ import io.github.playertwo1.bookconverter.core.translate.StoredChunk
 import io.github.playertwo1.bookconverter.core.translate.TranslationEngine
 import io.github.playertwo1.bookconverter.core.translate.TranslationStore
 import io.github.playertwo1.bookconverter.data.AppDatabase
+import io.github.playertwo1.bookconverter.data.GoogleDriveSettings
 import io.github.playertwo1.bookconverter.data.JobStatus
 import io.github.playertwo1.bookconverter.data.MemoryCategory
 import io.github.playertwo1.bookconverter.data.ProviderSettings
 import io.github.playertwo1.bookconverter.data.TranslationDao
 import io.github.playertwo1.bookconverter.data.TranslationJob
 import kotlinx.coroutines.CancellationException
+import java.io.File
 
 class TranslationWorker(
     appContext: Context,
@@ -277,6 +281,7 @@ class TranslationWorker(
                 when (outcome) {
                     is JobOutcome.Completed -> {
                         dao.updateJobStatus(job.id, JobStatus.COMPLETED, null, outcomeTime)
+                        maybeAutoUploadToDrive(job.id, db)
                     }
                     is JobOutcome.Paused -> {
                         dao.updateJobStatus(job.id, JobStatus.PAUSED, null, outcomeTime)
@@ -392,6 +397,7 @@ class TranslationWorker(
             val pending = dao.pendingChunksForJob(job.id)
             if (pending.isEmpty()) {
                 dao.updateJobStatus(job.id, JobStatus.COMPLETED, null, now)
+                maybeAutoUploadToDrive(job.id, db)
                 return BatchRunResult.DONE
             }
 
@@ -501,6 +507,7 @@ class TranslationWorker(
                         dao.updateJobStatus(job.id, JobStatus.COMPLETED, null, finishTime)
                         val doneNotif = buildNotification(bookTitle, updatedChunks.size, updatedChunks.size, job.id, ongoing = false)
                         notificationManager.notify(NOTIFICATION_ID, doneNotif)
+                        maybeAutoUploadToDrive(job.id, db)
                     } else {
                         val failedCount = failedChunks.size + remainingPending.size
                         val reason = "Lote Batch finalizado com falhas: $failedCount de ${updatedChunks.size} blocos não traduzidos."
@@ -632,6 +639,52 @@ class TranslationWorker(
     private enum class BatchRunResult {
         DONE,
         RETRY,
+    }
+
+    private suspend fun maybeAutoUploadToDrive(jobId: Long, db: AppDatabase) {
+        try {
+            val driveSettings = GoogleDriveSettings(applicationContext)
+            if (!driveSettings.autoUploadOnComplete || !driveSettings.isConnected) {
+                return
+            }
+            val job = db.translations().jobById(jobId) ?: return
+            val book = db.books().byId(job.bookId) ?: return
+            val originalFile = File(book.privatePath)
+            if (!originalFile.exists()) {
+                Log.w(TAG, "Auto-upload Drive: arquivo original não encontrado")
+                return
+            }
+
+            val chunks = db.translations().chunksForJob(job.id)
+            val chunkInputs = chunks.map { c ->
+                ChunkTranslationInput(
+                    spineIndex = c.spineIndex,
+                    startBlockIndex = c.startBlockIndex,
+                    endBlockIndex = c.endBlockIndex,
+                    blockCount = c.blockCount,
+                    translatedText = c.translatedText,
+                )
+            }
+            val blockMap = EpubExporter.buildBlockMapFromChunks(originalFile, chunkInputs)
+            val exportsDir = File(applicationContext.cacheDir, "exports").apply { mkdirs() }
+            val tempOut = File(exportsDir, "tmp_drive_${job.id}_${System.currentTimeMillis()}.epub")
+            try {
+                EpubExporter.exportPtBr(originalFile, tempOut, blockMap)
+                val bytes = tempOut.readBytes()
+                val safeTitle = book.title
+                    .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                    .trim('_')
+                    .take(50)
+                    .ifBlank { "livro" }
+                val fileName = "$safeTitle-pt-BR.epub"
+                driveSettings.uploadToConfiguredFolder(fileName, "application/epub+zip", bytes)
+                Log.i(TAG, "Auto-upload para o Google Drive concluído: $fileName")
+            } finally {
+                tempOut.delete()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Falha no auto-upload para o Google Drive: ${e.message}")
+        }
     }
 
     companion object {

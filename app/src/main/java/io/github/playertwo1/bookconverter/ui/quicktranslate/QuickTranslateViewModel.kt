@@ -16,6 +16,7 @@ import io.github.playertwo1.bookconverter.core.translate.GlossaryTerm
 import io.github.playertwo1.bookconverter.core.translate.Prompt
 import io.github.playertwo1.bookconverter.core.translate.TextExporter
 import io.github.playertwo1.bookconverter.data.AppDatabase
+import io.github.playertwo1.bookconverter.data.GoogleDriveSettings
 import io.github.playertwo1.bookconverter.data.PdfExporter
 import io.github.playertwo1.bookconverter.data.ProviderSettings
 import io.github.playertwo1.bookconverter.data.Series
@@ -243,7 +244,8 @@ class QuickTranslateViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
 
-                var currentEffort: String? = null
+                val rejected = settings.rejectedEfforts(provider, model)
+                var currentEffort: String? = if (rejected.contains("medium") || rejected.contains("effort")) null else "medium"
                 val translatedBlocks = mutableListOf<String>()
                 var totalInputTokens = 0L
                 var totalOutputTokens = 0L
@@ -281,7 +283,9 @@ class QuickTranslateViewModel(app: Application) : AndroidViewModel(app) {
                             )
                         } catch (e: ProviderError) {
                             if (e.kind == ErrorKind.EFFORT_REJECTED && currentEffort != null) {
+                                val rejectedEffort = currentEffort
                                 currentEffort = null
+                                settings.rejectEffort(provider, model, rejectedEffort)
                                 settings.rejectEffort(provider, model, "effort")
                                 client.translate(
                                     model = model,
@@ -380,7 +384,68 @@ class QuickTranslateViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun uploadToDrive(format: ExportFormat) {
+        val textToExport = _uiState.value.translatedText
+        if (textToExport.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Nenhum texto traduzido para enviar.") }
+            return
+        }
+
+        val driveSettings = GoogleDriveSettings(getApplication())
+        if (!driveSettings.isConnected) {
+            _uiState.update { it.copy(errorMessage = "Conecte o Google Drive em Ajustes primeiro.") }
+            return
+        }
+
+        val titleToExport = _uiState.value.title.trim().takeIf { it.isNotEmpty() }
+        val fileName = suggestedFileName(_uiState.value.title, format)
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(progressText = "Enviando ao Drive…", errorMessage = null) }
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    when (format) {
+                        ExportFormat.TXT -> TextExporter.toTxt(textToExport)
+                        ExportFormat.DOC -> TextExporter.toDocx(textToExport, titleToExport)
+                        ExportFormat.PDF -> PdfExporter.toPdfBytes(textToExport, titleToExport)
+                        ExportFormat.MD -> TextExporter.toMarkdown(textToExport, titleToExport)
+                    }
+                }
+
+                val uploaded = withContext(Dispatchers.IO) {
+                    driveSettings.uploadToConfiguredFolder(
+                        fileName = fileName,
+                        mimeType = format.mimeType,
+                        bytes = bytes,
+                    )
+                }
+
+                val folderName = driveSettings.selectedFolderName
+                _uiState.update {
+                    it.copy(
+                        progressText = null,
+                        statusMessage = "Enviado para o Google Drive ($folderName): ${uploaded.name}",
+                        errorMessage = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        progressText = null,
+                        errorMessage = "Erro ao enviar para o Google Drive: ${e.message ?: "Falha no upload"}",
+                        statusMessage = null,
+                    )
+                }
+            }
+        }
+    }
+
     companion object {
+        fun suggestedFileName(title: String, format: ExportFormat): String {
+            val base = title.trim().ifBlank { "traducao" }
+                .replace(Regex("""[\\/:*?"<>|]"""), "_")
+            return "$base.${format.extension}"
+        }
         private val MARKER_REGEX = Regex("""^⟦\d+⟧\s*""")
 
         private const val BASE_TRANSLATE_PROMPT =
