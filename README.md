@@ -1,74 +1,98 @@
 # Bookconverter Android
 
-Tradutor literário **EN → pt-BR** nativo para Android (Kotlin, Jetpack Compose, Room, WorkManager e `libmobi` via NDK), irmão do [bookconverter](https://github.com/playertwo1/bookconverter) desktop. Uso pessoal, distribuído via APK assinado.
+![Prancha de design do Bookconverter Android com biblioteca e leitura bilíngue](docs/spec/04_DESIGN/referencias_aprovadas/Conceito_Biblioteca_Leitura_Bilingue.png)
 
----
+*Conceito visual da biblioteca e da revisão bilíngue.*
 
-## O que o aplicativo faz
+Traduza livros do inglês para o português brasileiro no Android. Importe um ebook sem DRM, faça uma prévia com seu provedor de IA e revise a tradução lado a lado antes de exportar. O app é voltado ao uso pessoal e acompanha o [Bookconverter para desktop](https://github.com/playertwo1/bookconverter).
 
-- **Biblioteca e Importação (EPUB, MOBI e AZW3 sem DRM)**
-  - Importação via seletor de documentos (SAF) com cópia privada isolada em app storage (`SHA-256`).
-  - Suporte nativo a **EPUB 2/3** (`jsoup` + ZIP com proteção contra Zip-Slip e Zip-Bomb) e **MOBI6 / AZW3 (KF8)** sem DRM via **`libmobi` compilada no NDK** (`arm64-v8a` e `x86_64`) convertida internamente para EPUB.
-  - Recusa explícita de arquivos com **DRM** (Adobe, Apple, Amazon Kindle) sem contorno e sem gravar cópia.
-  - Tela de **Verificação** mostrando capítulos, índice (NCX/NAV), blocos estáveis e cobertura de texto.
+[Baixar APK](https://github.com/playertwo1/bookconverter-android/releases/latest) · [Primeiro livro](#primeiro-livro) · [Exemplos](#exemplos-de-uso) · [Desenvolvimento](#desenvolvimento)
 
-- **Provedores de IA e Controle de Gasto**
-  - Suporte a **OpenAI** (Responses API), **ChatGPT pelo plano** (login oficial *Sign in with ChatGPT* via PKCE), **Anthropic** (Claude), **Google Gemini** e **OpenRouter / Genérico** (qualquer endpoint compatível com `/v1/chat/completions`, incluindo DeepSeek, Groq, Ollama e gateway Cloudflare via URL base opcional).
-  - Chaves de API e tokens OAuth cifrados com **Android Keystore (AES-GCM)** — nunca salvos em SQLite nem exibidos em logs.
-  - **Prévia real de amostra** + estimativa de tokens de entrada/saída do livro inteiro + **teto de orçamento em tokens**.
+## Veja o fluxo
 
-- **Tradução Resiliente em Segundo Plano + Fila Serial**
-  - Máquina de estados e checkpoint transacional por bloco no **Room** (`block_done = COUNT(COMPLETED)`), com reconciliação automática após queda de processo ou reinício.
-  - **WorkManager** + **Foreground Service `dataSync`** com notificação de progresso e ação **Pausar**.
-  - Pausar, retomar, cancelar e fila serial de múltiplos livros (FIFO), além de esperas automáticas para falta de rede (`WAITING_NETWORK`), HTTP 429 (`WAITING_RATE_LIMIT`) e teto de orçamento (`PAUSED_BUDGET`).
-  - **Modo econômico (Batch API)** assíncrono para OpenAI, Anthropic e Gemini.
+| Biblioteca | Verificação do EPUB | Configuração da tradução |
+| :---: | :---: | :---: |
+| <img src="docs/readme/biblioteca.png" width="220" alt="Biblioteca do app com Animal Farm importado"> | <img src="docs/readme/verificacao.png" width="220" alt="Verificação do EPUB com índice, texto extraído e status do DRM"> | <img src="docs/readme/nova-traducao.png" width="220" alt="Nova tradução com opções de série, provedor e prévia"> |
+| Importe seus ebooks. | Confira o conteúdo extraído. | Escolha o provedor e configure a prévia. |
 
-- **Séries, Glossário, Estilo e Memória por IA**
-  - Criação de séries, vínculo com livros e notas de estilo.
-  - Glossário manual + importação/exportação no formato `.txt` do desktop (`termo → tradução` e `->`), injetando no prompt **apenas os termos presentes em cada bloco**.
-  - **Memória por IA**: extrai propostas de **Termos**, **Personagens** e **Pares EN↔PT** de volumes anteriores (EN, PT ou traduzidos no PC), sempre mostrando o trecho original e sinalizando conflitos para aprovação manual.
-  - **RAG semântico local** (TF-IDF + trigramas) para selecionar os pares EN↔PT mais relevantes de cada trecho.
+*Capturas do app no emulador Android com um EPUB de exemplo.*
 
-- **Revisão, Tradução Rápida e Exportação**
-  - **Revisão lado a lado** (Original vs. Tradução pt-BR), edição manual por bloco, retradução de bloco isolado e exportação limpa **só em pt-BR** (sem tocar no original) em **EPUB** (validado estruturalmente), **DOCX** e **PDF**, além de compartilhamento via Intent (`FileProvider`).
-  - Janela **Traduzir texto**: cole qualquer texto avulso, escolha uma série opcional, traduza e exporte em **TXT**, **DOC (.docx)**, **PDF** ou **Markdown (.md)**.
+Na etapa seguinte, compare original e tradução antes de exportar. [Veja o mockup da revisão bilíngue](docs/spec/04_DESIGN/screens/16_Revisao_bilingue.png).
 
-- **Backup, Acessibilidade e Tema**
-  - **Backup e restauração manual** em `.zip` (banco SQLite com `wal_checkpoint`, cópias privadas dos livros e glossários `.txt` — sem incluir chaves de API).
-  - Tema **AMOLED Escuro**, **Claro** e **Sistema**, com suporte a rotação (`rememberSaveable`), fonte ampliada e TalkBack.
 
----
+## Instalação
 
-## Módulos
+1. Em um dispositivo com **Android 14 ou superior** (`arm64-v8a` ou `x86_64`), baixe o APK assinado na [página de releases](https://github.com/playertwo1/bookconverter-android/releases/latest).
+2. Abra o APK. Se o Android solicitar, autorize a instalação de apps pela origem usada para abrir o arquivo.
+3. No app, abra **Ajustes → Provedores**, configure o acesso a um serviço e selecione o modelo. A tradução usa conexão com a internet para provedores remotos e pode gerar cobranças conforme o serviço escolhido.
 
-- `core/` — Motor puro Kotlin/JVM (`Epub`, `MobiEpubPackager`, `EpubExporter`, `TextExporter`, `Providers`, `BatchProviders`, `Catalog`, `TranslationEngine`, `Glossary`, `SeriesMemory`, `SeriesRag`), testado no PC.
-- `app/` — Aplicativo Android (Jetpack Compose, Room v5 com migrações `1→5`, WorkManager + FGS `dataSync`, Keystore, `PdfDocument`, NDK/CMake + `libmobi`).
+## Primeiro livro
 
----
+1. Na biblioteca, importe um arquivo **EPUB 2/3**, **MOBI** ou **AZW3** sem DRM. Confira os capítulos e a cobertura de texto na tela de verificação.
+2. Inicie uma nova tradução, gere a prévia e confira a estimativa de tokens. Se quiser limitar o consumo, defina um teto de tokens antes de iniciar.
+3. Acompanhe o progresso pela notificação. Você pode pausar ou retomar a tradução e adicionar outros livros à fila.
+4. Na revisão bilíngue, edite ou retraduza os trechos necessários. Exporte a versão em pt-BR como **EPUB, DOCX ou PDF** e compartilhe o arquivo pelo Android. O livro original é preservado.
 
-## Como compilar e testar
+## Exemplos de uso
 
-```bash
-# Testes unitários (JVM)
-./gradlew :core:test :app:testDebugUnitTest
+**Traduzir um livro para ler em outro aparelho.** Importe um EPUB em inglês, gere a prévia e inicie a tradução. Depois de revisar, exporte em EPUB para abrir em um leitor compatível. Escolha DOCX se quiser continuar editando em um editor de texto.
 
-# Build Debug (compila NDK libmobi para arm64-v8a e x86_64)
-./gradlew :app:assembleDebug
+**Manter nomes consistentes entre volumes.** Crie uma série, vincule os livros e importe um glossário TXT com uma entrada por linha. Os termos entram no contexto quando aparecem no trecho em tradução.
 
-# Testes instrumentados no aparelho/emulador conectado
-./gradlew :app:assembleDebugAndroidTest
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb shell am instrument -w io.github.playertwo1.bookconverter.test/androidx.test.runner.AndroidJUnitRunner
+```text
+Moon Harbor → Porto da Lua
+Council of Tides → Conselho das Marés
 ```
 
-> Os testes de integração reais com provedores em `:core` rodam apenas se as variáveis `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` e `GEMINI_API_KEY` (mais `<PROVEDOR>_MODEL`) estiverem definidas no ambiente.
+**Traduzir só um parágrafo.** Na biblioteca, abra **Traduzir texto** e cole, por exemplo, “The lighthouse went dark before dawn.” Uma tradução possível seria “O farol se apagou antes do amanhecer.” Exporte em TXT ou Markdown se quiser guardar o trecho.
 
----
+## Como funciona
 
-## Documentação e Especificação
+```mermaid
+flowchart LR
+    A["EPUB, MOBI ou AZW3"] --> B["Importação e divisão em blocos"]
+    B --> C["Prévia e fila de tradução"]
+    C --> D["Provedor de IA"]
+    D --> E["Progresso salvo por bloco"]
+    E --> F["Revisão bilíngue"]
+    F --> G["EPUB, DOCX ou PDF"]
+```
 
-- Especificação de produto, arquitetura, design e critérios de aceite: [`docs/spec/`](docs/spec/README_COMECE_AQUI.md)
-- Precedência entre documentos: [`docs/README.md`](docs/README.md)
-- Decisões técnicas (D1–D14): [`docs/DECISOES.md`](docs/DECISOES.md)
-- Roadmap e marcos de saída: [`ROADMAP.md`](ROADMAP.md)
+O app guarda uma cópia privada do livro e envia os trechos ao provedor configurado para traduzi-los. A tradução pode ser retomada a partir dos blocos já salvos. A exportação gera um arquivo separado em português.
+
+## Recursos
+
+- **Provedores** — OpenAI, ChatGPT via login, Anthropic, Google Gemini e OpenRouter. O adaptador genérico aceita URL base de serviços compatíveis com `/v1/chat/completions`. OpenAI, Anthropic e Gemini oferecem processamento assíncrono pela Batch API.
+- **Fila e retomada** — processa um livro por vez e salva o progresso por bloco. O trabalho pode aguardar quando falta rede, quando o provedor limita requisições ou quando o teto de tokens é atingido.
+- **Séries e consistência** — reúna livros de uma série, defina notas de estilo e importe glossários do desktop em TXT (`termo → tradução` ou `termo -> tradução`). O app pode sugerir termos, personagens e pares EN↔PT a partir de volumes anteriores, com trechos de origem e conflitos para revisão. A seleção de pares relevantes ocorre localmente.
+- **Texto avulso** — use **Traduzir texto** para colar um trecho, aplicar opcionalmente o contexto de uma série e exportar em TXT, DOCX, PDF ou Markdown.
+- **Backup e preferências** — exporte ou restaure um ZIP com banco, livros e glossários. As credenciais são protegidas pelo Android Keystore e ficam fora do backup. A interface oferece temas claro, AMOLED e do sistema, além de suporte a fonte ampliada e TalkBack.
+
+## Desenvolvimento
+
+Use um **JDK 17** para a toolchain Kotlin/JVM e instale pelo Android Studio o **Android SDK 36**, o **NDK (Side by side)** e o **CMake 3.22.1**. Configure o caminho do SDK local pelo Android Studio e execute os comandos na raiz do repositório.
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+.\gradlew.bat :core:test :app:testDebugUnitTest
+.\gradlew.bat :app:connectedDebugAndroidTest
+```
+
+No Linux ou macOS, use `./gradlew` no lugar de `.\gradlew.bat`. Os testes instrumentados precisam de um aparelho ou emulador compatível conectado. Para instalar o APK de depuração:
+
+```powershell
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+Os testes de integração com OpenAI, Anthropic e Gemini usam, respectivamente, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` e `GEMINI_API_KEY`. Cada provedor precisa da sua própria chave. Para executar a etapa de tradução desses testes, defina também a variável correspondente `OPENAI_MODEL`, `ANTHROPIC_MODEL` ou `GEMINI_MODEL`.
+
+- [`app/`](app/) reúne as telas Jetpack Compose, a persistência Room, a execução em segundo plano via WorkManager e a conversão nativa de MOBI/AZW3 via `libmobi`.
+- [`core/`](core/) reúne o processamento de EPUB, os adaptadores de provedores, o motor de tradução e a lógica de memória de série em Kotlin/JVM.
+
+## Documentação
+
+- [Especificação do produto e critérios de aceite](docs/spec/README_COMECE_AQUI.md)
+- [Índice e precedência dos documentos](docs/README.md)
+- [Decisões técnicas](docs/DECISOES.md)
+- [Roadmap](ROADMAP.md)
+- [Notas da versão 1.0.0](docs/releases/v1.0.0.md)
