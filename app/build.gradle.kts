@@ -13,8 +13,8 @@ android {
     applicationId = "io.github.playertwo1.bookconverter"
     minSdk = 34
     targetSdk = 36
-    versionCode = 4
-    versionName = "1.0.2"
+    versionCode = 5
+    versionName = "1.0.3"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     ndk {
       abiFilters += listOf("arm64-v8a", "x86_64")
