@@ -108,7 +108,7 @@ internal suspend fun matchExistingSeriesForAuthor(
         }
         return null
     }
-    return matches.singleOrNull()?.takeIf { normalizeAuthor(it.author) == null }
+    return matches.filter { normalizeAuthor(it.author) == null }.singleOrNull()
 }
 
 private suspend fun resolveOrCreateSeries(

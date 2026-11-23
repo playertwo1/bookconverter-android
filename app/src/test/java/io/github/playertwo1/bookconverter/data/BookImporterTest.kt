@@ -602,6 +602,39 @@ class BookImporterTest {
         assertNull(authorlessRes.linkedSeriesName)
     }
 
+    @Test fun blankAuthorReusesSingleAuthorlessHomonymousSeriesInsteadOfDuplicating() = runBlocking {
+        val seriesDao = FakeSeriesDao()
+        val aliceId = seriesDao.insertSeries(
+            Series(name = "Chronicles", author = "Alice Vance", createdAt = 1L, updatedAt = 1L)
+        )
+        val blankId = seriesDao.insertSeries(
+            Series(name = "Chronicles", author = null, createdAt = 2L, updatedAt = 2L)
+        )
+
+        val matched = matchExistingSeriesForAuthor(
+            matches = seriesDao.findAllByNameIgnoreCase("Chronicles"),
+            cleanAuthor = null,
+            seriesDao = seriesDao,
+            now = 3L,
+        )
+        assertNotNull(matched)
+        assertEquals(blankId, matched?.id)
+        assertNotEquals(aliceId, matched?.id)
+        assertEquals(2, seriesDao.rows.size)
+
+        // Com duas séries sem autor ([Alice, N1, N2]), continua ambíguo (null)
+        seriesDao.insertSeries(
+            Series(name = "Chronicles", author = null, createdAt = 4L, updatedAt = 4L)
+        )
+        val ambiguous = matchExistingSeriesForAuthor(
+            matches = seriesDao.findAllByNameIgnoreCase("Chronicles"),
+            cleanAuthor = null,
+            seriesDao = seriesDao,
+            now = 5L,
+        )
+        assertNull(ambiguous)
+    }
+
     @Test fun suggestSeriesNameStripsTrailingVolumeMarkersOnly() {
         assertEquals("Duna", suggestSeriesName("Duna - Livro 1"))
         assertEquals("Mistborn", suggestSeriesName("Mistborn (Vol. 2)"))
