@@ -17,11 +17,32 @@ import kotlinx.coroutines.flow.Flow
 data class Series(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
+    val author: String? = null,
     val styleNotes: String = "",
     val glossaryVersion: Int = 1,
     val createdAt: Long,
     val updatedAt: Long,
 )
+
+private val PARENTHETICAL_VOLUME_SUFFIX = Regex(
+    """\s*[\(\[]\s*(?:livro|book|vol(?:ume|\.)?|parte|part|tomo|#)\s*\d+[^)\]]*[\)\]]\s*$""",
+    RegexOption.IGNORE_CASE,
+)
+
+private val SEPARATOR_VOLUME_SUFFIX = Regex(
+    """\s*(?:[-–—:,]\s*|\s+)(?:livro|book|vol(?:ume|\.)?|parte|part|tomo|#)\s*\d+\s*$""",
+    RegexOption.IGNORE_CASE,
+)
+
+fun suggestSeriesName(bookTitle: String): String {
+    val trimmed = bookTitle.trim()
+    if (trimmed.isEmpty()) return ""
+    val stripped = trimmed
+        .replace(PARENTHETICAL_VOLUME_SUFFIX, "")
+        .replace(SEPARATOR_VOLUME_SUFFIX, "")
+        .trim()
+    return stripped.ifEmpty { trimmed }
+}
 
 @Entity(
     tableName = "GlossaryEntry",
@@ -116,6 +137,9 @@ interface SeriesDao {
 
     @Query("SELECT * FROM Series WHERE id = :seriesId")
     suspend fun byId(seriesId: Long): Series?
+
+    @Query("SELECT * FROM Series WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
+    suspend fun findByNameIgnoreCase(name: String): Series?
 
     @Insert
     suspend fun insertSeries(series: Series): Long

@@ -13,7 +13,12 @@ import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
 
-class ImportResult(val book: Book, val alreadyInLibrary: Boolean, val verification: Verification)
+class ImportResult(
+    val book: Book,
+    val alreadyInLibrary: Boolean,
+    val verification: Verification,
+    val linkedSeriesName: String? = null,
+)
 
 private const val MAX_FILE_BYTES = 512L * 1024 * 1024
 
@@ -76,6 +81,34 @@ internal fun defaultConvertMobi(source: File, targetEpub: File): MobiConvertedMe
     }
 }
 
+private suspend fun resolveOrCreateSeries(
+    seriesName: String?,
+    author: String?,
+    seriesDao: SeriesDao?,
+    now: Long,
+): Series? {
+    if (seriesDao == null || seriesName.isNullOrBlank()) return null
+    val cleanName = seriesName.trim()
+    val cleanAuthor = author?.trim()?.takeIf { it.isNotEmpty() }
+    val existing = seriesDao.findByNameIgnoreCase(cleanName)
+    if (existing != null) {
+        return if (existing.author.isNullOrBlank() && cleanAuthor != null) {
+            existing.copy(author = cleanAuthor, updatedAt = now).also { seriesDao.updateSeries(it) }
+        } else {
+            existing
+        }
+    }
+    val created = Series(
+        name = cleanName,
+        author = cleanAuthor,
+        styleNotes = "",
+        glossaryVersion = 1,
+        createdAt = now,
+        updatedAt = now,
+    )
+    return created.copy(id = seriesDao.insertSeries(created))
+}
+
 /**
  * Copies [input] into [booksDir] as `<sha256>.epub` and records it, but only after [Epub.read]
  * accepts it (readable, DRM-free, safe ZIP). Throws [EpubException] with a pt-BR message otherwise.
@@ -88,6 +121,7 @@ suspend fun importEpub(
     dao: BookDao,
     now: Long = System.currentTimeMillis(),
     mobiToEpub: (source: File, targetEpub: File) -> MobiConvertedMeta = ::defaultConvertMobi,
+    seriesDao: SeriesDao? = null,
 ): ImportResult = withContext(Dispatchers.IO) {
     booksDir.mkdirs()
     val tmp = File.createTempFile("import-", ".tmp", booksDir)
@@ -119,9 +153,11 @@ suspend fun importEpub(
                 if (!tmp.renameTo(target) && !(target.delete() && tmp.renameTo(target))) {
                     throw IOException("Não consegui gravar a cópia privada do livro")
                 }
+                val bookAuthor = epub.author?.trim()?.takeIf { it.isNotEmpty() }
+                val linkedSeries = resolveOrCreateSeries(epub.series, bookAuthor, seriesDao, now)
                 val book = Book(
                     title = epub.title?.trim()?.takeIf { it.isNotEmpty() } ?: sourceName.substringBeforeLast('.'),
-                    author = epub.author?.trim()?.takeIf { it.isNotEmpty() },
+                    author = bookAuthor,
                     language = epub.language?.trim()?.takeIf { it.isNotEmpty() },
                     format = "EPUB",
                     sha256 = sha,
@@ -129,8 +165,14 @@ suspend fun importEpub(
                     sourceName = sourceName,
                     sizeBytes = size,
                     importedAt = now,
+                    seriesId = linkedSeries?.id,
                 )
-                ImportResult(book.copy(id = dao.insert(book)), alreadyInLibrary = false, verification)
+                ImportResult(
+                    book.copy(id = dao.insert(book)),
+                    alreadyInLibrary = false,
+                    verification,
+                    linkedSeriesName = linkedSeries?.name,
+                )
             }
             FileFormat.MOBI -> {
                 val probe = MobiSniffer.probe(tmp)
@@ -152,12 +194,14 @@ suspend fun importEpub(
                         target.delete()
                         throw EpubException("Livro MOBI/AZW3 sem texto extraível")
                     }
+                    val bookAuthor = meta.author?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: epub.author?.trim()?.takeIf { it.isNotEmpty() }
+                    val linkedSeries = resolveOrCreateSeries(epub.series, bookAuthor, seriesDao, now)
                     val book = Book(
                         title = meta.title?.trim()?.takeIf { it.isNotEmpty() }
                             ?: epub.title?.trim()?.takeIf { it.isNotEmpty() }
                             ?: sourceName.substringBeforeLast('.'),
-                        author = meta.author?.trim()?.takeIf { it.isNotEmpty() }
-                            ?: epub.author?.trim()?.takeIf { it.isNotEmpty() },
+                        author = bookAuthor,
                         language = meta.language?.trim()?.takeIf { it.isNotEmpty() }
                             ?: epub.language?.trim()?.takeIf { it.isNotEmpty() },
                         format = meta.format.ifBlank { probe?.kind?.name ?: "MOBI" },
@@ -166,8 +210,14 @@ suspend fun importEpub(
                         sourceName = sourceName,
                         sizeBytes = size,
                         importedAt = now,
+                        seriesId = linkedSeries?.id,
                     )
-                    ImportResult(book.copy(id = dao.insert(book)), alreadyInLibrary = false, verification)
+                    ImportResult(
+                        book.copy(id = dao.insert(book)),
+                        alreadyInLibrary = false,
+                        verification,
+                        linkedSeriesName = linkedSeries?.name,
+                    )
                 } catch (e: Throwable) {
                     target.delete()
                     throw e
@@ -186,4 +236,5 @@ suspend fun importBook(
     dao: BookDao,
     now: Long = System.currentTimeMillis(),
     mobiToEpub: (source: File, targetEpub: File) -> MobiConvertedMeta = ::defaultConvertMobi,
-): ImportResult = importEpub(input, sourceName, booksDir, dao, now, mobiToEpub)
+    seriesDao: SeriesDao? = null,
+): ImportResult = importEpub(input, sourceName, booksDir, dao, now, mobiToEpub, seriesDao)

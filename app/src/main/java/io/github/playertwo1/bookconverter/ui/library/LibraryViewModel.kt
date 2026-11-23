@@ -18,7 +18,9 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 class LibraryViewModel(app: Application) : AndroidViewModel(app) {
-    private val dao = AppDatabase.get(app).books()
+    private val db = AppDatabase.get(app)
+    private val dao = db.books()
+    private val seriesDao = db.series()
 
     val books: StateFlow<List<Book>> = dao.all()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -39,12 +41,12 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
                 } ?: "livro.epub"
                 val stream = resolver.openInputStream(uri) ?: error("não consegui abrir o arquivo")
                 val result = stream.use {
-                    importEpub(it, name, File(getApplication<Application>().filesDir, "books"), dao)
+                    importEpub(it, name, File(getApplication<Application>().filesDir, "books"), dao, seriesDao = seriesDao)
                 }
-                _message.value = if (result.alreadyInLibrary) {
-                    "“${result.book.title}” já está na biblioteca"
-                } else {
-                    "“${result.book.title}” importado"
+                _message.value = when {
+                    result.alreadyInLibrary -> "“${result.book.title}” já está na biblioteca"
+                    result.linkedSeriesName != null -> "“${result.book.title}” importado · série “${result.linkedSeriesName}”"
+                    else -> "“${result.book.title}” importado"
                 }
                 if (!result.alreadyInLibrary) onImported(result.book.id)
             } catch (e: EpubException) {

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -56,6 +57,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -64,6 +66,8 @@ import androidx.lifecycle.withStateAtLeast
 import io.github.playertwo1.bookconverter.core.provider.DriveFolder
 import io.github.playertwo1.bookconverter.core.provider.GoogleDriveAuth
 import io.github.playertwo1.bookconverter.core.provider.ProviderError
+import io.github.playertwo1.bookconverter.core.update.GitHubUpdateChecker
+import io.github.playertwo1.bookconverter.core.update.UpdateCheckResult
 import io.github.playertwo1.bookconverter.data.BackupManager
 import io.github.playertwo1.bookconverter.data.GoogleDriveSettings
 import io.github.playertwo1.bookconverter.ui.theme.Accent
@@ -120,6 +124,10 @@ fun SettingsScreen(onOpenProviders: () -> Unit) {
     var isFoldersLoading by rememberSaveable { mutableStateOf(false) }
     var foldersError by rememberSaveable { mutableStateOf<String?>(null) }
     var foldersList by remember { mutableStateOf<List<DriveFolder>>(emptyList()) }
+
+    val updateChecker = remember { GitHubUpdateChecker() }
+    var isCheckingUpdate by rememberSaveable { mutableStateOf(false) }
+    var updateResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -721,12 +729,197 @@ fun SettingsScreen(onOpenProviders: () -> Unit) {
             }
         }
 
+        // Card Atualizações (GitHub Releases)
+        Column(
+            Modifier
+                .padding(top = 16.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Surface)
+                .border(1.dp, Stroke, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+        ) {
+            Text(
+                "Atualizações",
+                color = TextPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "Versão instalada: ${version.ifBlank { "desconhecida" }} · GitHub",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+            )
+
+            Button(
+                onClick = {
+                    scope.launch {
+                        isCheckingUpdate = true
+                        updateResult = null
+                        try {
+                            updateResult = withContext(Dispatchers.IO) {
+                                updateChecker.checkForUpdate(version)
+                            }
+                        } finally {
+                            isCheckingUpdate = false
+                        }
+                    }
+                },
+                enabled = !isCheckingUpdate,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Accent,
+                    contentColor = TextPrimary,
+                    disabledContainerColor = Field,
+                    disabledContentColor = TextTertiary,
+                ),
+            ) {
+                if (isCheckingUpdate) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = TextSecondary,
+                            strokeWidth = 2.dp,
+                        )
+                        Text("Verificando no GitHub...", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    Text("Procurar atualização no GitHub", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            fun openExternalUrl(url: String) {
+                try {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (_: Exception) {
+                    updateResult = UpdateCheckResult.Failed("Não foi possível abrir o navegador.")
+                }
+            }
+
+            when (val r = updateResult) {
+                is UpdateCheckResult.UpToDate -> {
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Positive.copy(alpha = 0.15f))
+                            .border(1.dp, Positive.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "Você já está na versão mais recente (${r.latestVersion}).",
+                            color = Positive,
+                            fontSize = 13.sp,
+                        )
+                    }
+                }
+                is UpdateCheckResult.UpdateAvailable -> {
+                    Spacer(Modifier.height(14.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AccentSoft)
+                            .border(1.dp, Accent, RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            "Nova versão disponível: ${r.release.tagName}",
+                            color = TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        if (r.release.releaseNotes.isNotBlank()) {
+                            Text(
+                                r.release.releaseNotes,
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                maxLines = 6,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (r.release.apkDownloadUrl != null) {
+                            val apkUrl = r.release.apkDownloadUrl!!
+                            Button(
+                                onClick = { openExternalUrl(apkUrl) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Accent,
+                                    contentColor = TextPrimary,
+                                ),
+                            ) {
+                                Text("Baixar APK (${r.release.tagName})", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Button(
+                                onClick = { openExternalUrl(r.release.htmlUrl) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Field,
+                                    contentColor = TextPrimary,
+                                ),
+                            ) {
+                                Text("Ver no GitHub", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        } else {
+                            Button(
+                                onClick = { openExternalUrl(r.release.htmlUrl) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Accent,
+                                    contentColor = TextPrimary,
+                                ),
+                            ) {
+                                Text("Abrir release no GitHub", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+                is UpdateCheckResult.Failed -> {
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Danger.copy(alpha = 0.15f))
+                            .border(1.dp, Danger.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(r.message, color = Danger, fontSize = 13.sp)
+                    }
+                }
+                null -> Unit
+            }
+        }
+
         Text(
             "Bookconverter $version",
             color = TextTertiary,
             fontSize = 13.sp,
             modifier = Modifier.padding(top = 24.dp),
         )
+        Spacer(Modifier.navigationBarsPadding().height(80.dp))
     }
 
     pendingRestoreUriString?.let { uriStr ->

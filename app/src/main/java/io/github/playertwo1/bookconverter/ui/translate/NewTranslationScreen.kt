@@ -547,8 +547,13 @@ fun NewTranslationScreen(
                             )
                             val termText = "${count(summary.termCount)} ${if (summary.termCount == 1) "termo" else "termos"}"
                             val versionText = "v${summary.series.glossaryVersion}"
+                            val subtitle = listOfNotNull(
+                                summary.series.author?.takeIf { it.isNotBlank() },
+                                termText,
+                                "Glossário $versionText",
+                            ).joinToString(" · ")
                             Text(
-                                "$termText · Glossário $versionText",
+                                subtitle,
                                 color = TextTertiary,
                                 fontSize = 12.sp,
                             )

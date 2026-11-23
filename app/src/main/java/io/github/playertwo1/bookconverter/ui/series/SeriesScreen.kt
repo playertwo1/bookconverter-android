@@ -68,6 +68,7 @@ import io.github.playertwo1.bookconverter.data.MemoryStatus
 import io.github.playertwo1.bookconverter.data.Series
 import io.github.playertwo1.bookconverter.data.SeriesMemoryEntry
 import io.github.playertwo1.bookconverter.data.SeriesSummary
+import io.github.playertwo1.bookconverter.data.suggestSeriesName
 import io.github.playertwo1.bookconverter.ui.sizeLabel
 import io.github.playertwo1.bookconverter.ui.theme.Accent
 import io.github.playertwo1.bookconverter.ui.theme.AccentSoft
@@ -97,6 +98,8 @@ fun SeriesScreen(
     val message by vm.message.collectAsStateWithLifecycle()
 
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
+    var pendingBookForSeries by remember { mutableStateOf<Book?>(null) }
+    val unlinkedBooks = remember(allBooks) { allBooks.filter { it.seriesId == null } }
 
     if (selectedSeriesId != null && selectedSeries != null) {
         BackHandler { vm.selectSeries(null) }
@@ -110,7 +113,7 @@ fun SeriesScreen(
             message = message,
             onDismissMessage = { vm.clearMessage() },
             onBack = { vm.selectSeries(null) },
-            onUpdateSeries = { id, name, notes -> vm.updateSeries(id, name, notes) },
+            onUpdateSeries = { id, name, author, notes -> vm.updateSeries(id, name, author, notes) },
             onDeleteSeries = { id -> vm.deleteSeries(id) },
             onToggleBook = { book -> vm.toggleBookSeries(book, selectedSeries!!.id) },
             onSaveTerm = { entryId, src, tgt, notes ->
@@ -130,21 +133,36 @@ fun SeriesScreen(
     } else {
         SeriesListScreen(
             seriesList = seriesList,
+            unlinkedBooks = unlinkedBooks,
             message = message,
             onDismissMessage = { vm.clearMessage() },
-            onOpenCreate = { showCreateDialog = true },
+            onOpenCreate = {
+                pendingBookForSeries = null
+                showCreateDialog = true
+            },
+            onCreateFromBook = { book ->
+                pendingBookForSeries = book
+                showCreateDialog = true
+            },
             onSelectSeries = { id -> vm.selectSeries(id) },
             modifier = modifier,
         )
     }
 
     if (showCreateDialog) {
+        val targetBook = pendingBookForSeries
         CreateSeriesDialog(
-            onConfirm = { name, notes ->
+            initialName = targetBook?.let { suggestSeriesName(it.title) }.orEmpty(),
+            initialAuthor = targetBook?.author.orEmpty(),
+            onConfirm = { name, author, notes ->
                 showCreateDialog = false
-                vm.createSeries(name, notes)
+                pendingBookForSeries = null
+                vm.createSeries(name, author, notes, linkBookId = targetBook?.id)
             },
-            onDismiss = { showCreateDialog = false },
+            onDismiss = {
+                showCreateDialog = false
+                pendingBookForSeries = null
+            },
         )
     }
 }
@@ -152,9 +170,11 @@ fun SeriesScreen(
 @Composable
 private fun SeriesListScreen(
     seriesList: List<SeriesSummary>,
+    unlinkedBooks: List<Book>,
     message: String?,
     onDismissMessage: () -> Unit,
     onOpenCreate: () -> Unit,
+    onCreateFromBook: (Book) -> Unit,
     onSelectSeries: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -244,6 +264,74 @@ private fun SeriesListScreen(
                 }
             }
         }
+
+        if (unlinkedBooks.isNotEmpty()) {
+            item {
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    text = "Livros sem série",
+                    color = TextPrimary,
+                    fontFamily = Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                )
+                Text(
+                    text = "Crie uma série aproveitando título e autor do livro.",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+                )
+            }
+            items(unlinkedBooks, key = { "unlinked-${it.id}" }) { book ->
+                M3Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp),
+                    color = Surface,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Stroke),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 64.dp)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = book.title,
+                                color = TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            val meta = listOfNotNull(book.author, book.format).joinToString(" · ")
+                            if (meta.isNotEmpty()) {
+                                Text(
+                                    text = meta,
+                                    color = TextSecondary,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        OutlinedButton(
+                            onClick = { onCreateFromBook(book) },
+                            border = BorderStroke(1.dp, Stroke),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                        ) {
+                            Text("Criar série", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -296,6 +384,15 @@ private fun SeriesCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (!series.author.isNullOrBlank()) {
+                    Text(
+                        text = series.author,
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Spacer(Modifier.height(4.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -337,7 +434,7 @@ private fun SeriesDetailScreen(
     message: String?,
     onDismissMessage: () -> Unit,
     onBack: () -> Unit,
-    onUpdateSeries: (Long, String, String) -> Unit,
+    onUpdateSeries: (Long, String, String?, String) -> Unit,
     onDeleteSeries: (Long) -> Unit,
     onToggleBook: (Book) -> Unit,
     onSaveTerm: (Long, String, String, String?) -> Unit,
@@ -417,6 +514,15 @@ private fun SeriesDetailScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (!series.author.isNullOrBlank()) {
+                        Text(
+                            text = series.author,
+                            color = TextSecondary,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 OutlinedButton(
                     onClick = { showRenameDialog = true },
@@ -426,7 +532,7 @@ private fun SeriesDetailScreen(
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
                     modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                 ) {
-                    Text("Renomear", fontSize = 12.sp)
+                    Text("Editar", fontSize = 12.sp)
                 }
             }
         }
@@ -475,7 +581,7 @@ private fun SeriesDetailScreen(
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         Button(
-                            onClick = { onUpdateSeries(series.id, series.name, notesText) },
+                            onClick = { onUpdateSeries(series.id, series.name, series.author, notesText) },
                             enabled = isNotesModified,
                             colors = ButtonDefaults.buttonColors(containerColor = Accent),
                             shape = RoundedCornerShape(12.dp),
@@ -1178,11 +1284,12 @@ private fun SeriesDetailScreen(
     }
 
     if (showRenameDialog) {
-        RenameSeriesDialog(
+        EditSeriesDialog(
             currentName = series.name,
-            onConfirm = { newName ->
+            currentAuthor = series.author.orEmpty(),
+            onConfirm = { newName, newAuthor ->
                 showRenameDialog = false
-                onUpdateSeries(series.id, newName, series.styleNotes)
+                onUpdateSeries(series.id, newName, newAuthor, series.styleNotes)
             },
             onDismiss = { showRenameDialog = false },
         )
@@ -1303,10 +1410,13 @@ private fun MessageBanner(
 
 @Composable
 private fun CreateSeriesDialog(
-    onConfirm: (name: String, styleNotes: String) -> Unit,
+    initialName: String = "",
+    initialAuthor: String = "",
+    onConfirm: (name: String, author: String?, styleNotes: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var name by rememberSaveable { mutableStateOf("") }
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    var author by rememberSaveable(initialAuthor) { mutableStateOf(initialAuthor) }
     var styleNotes by rememberSaveable { mutableStateOf("") }
     var showError by rememberSaveable { mutableStateOf(false) }
 
@@ -1338,6 +1448,16 @@ private fun CreateSeriesDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
+                    value = author,
+                    onValueChange = { author = it },
+                    label = { Text("Autor (opcional)") },
+                    placeholder = { Text("Ex: J.R.R. Tolkien") },
+                    singleLine = true,
+                    colors = seriesFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
                     value = styleNotes,
                     onValueChange = { styleNotes = it },
                     label = { Text("Notas de estilo (opcional)") },
@@ -1361,7 +1481,7 @@ private fun CreateSeriesDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
-                        onConfirm(name.trim(), styleNotes.trim())
+                        onConfirm(name.trim(), author.trim().ifEmpty { null }, styleNotes.trim())
                     } else {
                         showError = true
                     }
@@ -1386,12 +1506,14 @@ private fun CreateSeriesDialog(
 }
 
 @Composable
-private fun RenameSeriesDialog(
+private fun EditSeriesDialog(
     currentName: String,
-    onConfirm: (newName: String) -> Unit,
+    currentAuthor: String,
+    onConfirm: (newName: String, newAuthor: String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var name by rememberSaveable { mutableStateOf(currentName) }
+    var name by rememberSaveable(currentName) { mutableStateOf(currentName) }
+    var author by rememberSaveable(currentAuthor) { mutableStateOf(currentAuthor) }
     var showError by rememberSaveable { mutableStateOf(false) }
 
     AlertDialog(
@@ -1399,7 +1521,7 @@ private fun RenameSeriesDialog(
         containerColor = Surface,
         title = {
             Text(
-                text = "Renomear série",
+                text = "Editar série",
                 fontFamily = Serif,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary,
@@ -1419,6 +1541,16 @@ private fun RenameSeriesDialog(
                     modifier = Modifier.fillMaxWidth(),
                     isError = showError && name.isBlank(),
                 )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = author,
+                    onValueChange = { author = it },
+                    label = { Text("Autor (opcional)") },
+                    placeholder = { Text("Ex: J.R.R. Tolkien") },
+                    singleLine = true,
+                    colors = seriesFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 if (showError) {
                     Text(
                         text = "O nome da série não pode ser vazio.",
@@ -1433,7 +1565,7 @@ private fun RenameSeriesDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
-                        onConfirm(name.trim())
+                        onConfirm(name.trim(), author.trim().ifEmpty { null })
                     } else {
                         showError = true
                     }

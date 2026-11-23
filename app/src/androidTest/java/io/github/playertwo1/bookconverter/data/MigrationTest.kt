@@ -32,7 +32,13 @@ class MigrationTest {
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, "migration-test-v1")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+            )
             .build()
         runBlocking {
             assertEquals(1, db.books().all().first().size)
@@ -54,14 +60,21 @@ class MigrationTest {
         // Run migration and validate schema against 2.json
         helper.runMigrationsAndValidate(dbName, 2, true, AppDatabase.MIGRATION_1_2)
 
-        // Continue migration to 3, 4 and 5 so Room database can open with current schema
+        // Continue migration to 3, 4, 5 and 6 so Room database can open with current schema
         helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_2_3)
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
+        helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+            )
             .build()
 
         runBlocking {
@@ -170,13 +183,20 @@ class MigrationTest {
         // Validate migration to version 3 against 3.json
         helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_2_3)
 
-        // Continue migration to 4 and 5 so Room database can open with current schema
+        // Continue migration to 4, 5 and 6 so Room database can open with current schema
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
+        helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+            )
             .build()
 
         runBlocking {
@@ -268,10 +288,17 @@ class MigrationTest {
         helper.runMigrationsAndValidate(dbName, 3, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
+        helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+            )
             .build()
 
         runBlocking {
@@ -309,12 +336,19 @@ class MigrationTest {
         // Validate migration to version 4 against 4.json
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
 
-        // Continue migration to 5 so Room database can open with current schema
+        // Continue migration to 5 and 6 so Room database can open with current schema
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
+        helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+            )
             .build()
 
         runBlocking {
@@ -452,10 +486,17 @@ class MigrationTest {
 
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
+        helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+            )
             .build()
 
         runBlocking {
@@ -515,12 +556,19 @@ class MigrationTest {
             close()
         }
 
-        // Validate migration to version 5 against 5.json
+        // Validate migration to version 5 against 5.json, then 6 against 6.json
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
+        helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+            )
             .build()
 
         runBlocking {
@@ -585,12 +633,13 @@ class MigrationTest {
 
         helper.runMigrationsAndValidate(
             dbName,
-            5,
+            6,
             true,
             AppDatabase.MIGRATION_1_2,
             AppDatabase.MIGRATION_2_3,
             AppDatabase.MIGRATION_3_4,
-            AppDatabase.MIGRATION_4_5
+            AppDatabase.MIGRATION_4_5,
+            AppDatabase.MIGRATION_5_6,
         )
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -599,7 +648,8 @@ class MigrationTest {
                 AppDatabase.MIGRATION_1_2,
                 AppDatabase.MIGRATION_2_3,
                 AppDatabase.MIGRATION_3_4,
-                AppDatabase.MIGRATION_4_5
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
             )
             .build()
 
@@ -642,5 +692,53 @@ class MigrationTest {
         assertNotNull(db3)
         assertNotSame(db1, db3)
         AppDatabase.closeInstance()
+    }
+
+    @Test
+    fun migration5To6PreservesSeriesAndAddsAuthor() {
+        val dbName = "migration-test-5-6"
+        helper.createDatabase(dbName, 5).apply {
+            execSQL(
+                "INSERT INTO Series (id, name, styleNotes, glossaryVersion, createdAt, updatedAt) " +
+                    "VALUES (1, 'Ciclo de Fundação', 'Tom clássico', 2, 1000, 1000)"
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+            )
+            .build()
+
+        runBlocking {
+            val existing = db.series().byId(1)
+            assertNotNull(existing)
+            assertEquals("Ciclo de Fundação", existing?.name)
+            assertEquals(null, existing?.author)
+
+            val newId = db.series().insertSeries(
+                Series(
+                    name = "Mistborn",
+                    author = "Brandon Sanderson",
+                    createdAt = 2000L,
+                    updatedAt = 2000L,
+                )
+            )
+            val created = db.series().byId(newId)
+            assertEquals("Brandon Sanderson", created?.author)
+
+            val found = db.series().findByNameIgnoreCase("  mistborn ")
+            assertNotNull(found)
+            assertEquals(newId, found?.id)
+        }
+        db.close()
     }
 }

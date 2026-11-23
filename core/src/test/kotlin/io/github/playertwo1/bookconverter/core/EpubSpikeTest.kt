@@ -7,6 +7,7 @@ import io.github.playertwo1.bookconverter.core.epub.TocEntry
 import io.github.playertwo1.bookconverter.core.epub.Verification
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
@@ -125,6 +126,57 @@ class EpubSpikeTest {
 
   @Test(expected = EpubException::class) fun refusesNonEpub() {
     Epub.read(zip("readme.txt" to "oi"))
+  }
+
+  @Test fun readsCalibreSeriesMetadata() {
+    val epub = Epub.read(book(
+      opf = """<package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <dc:title>Dune</dc:title><dc:creator>Frank Herbert</dc:creator>
+        <meta name="calibre:series" content="Dune Chronicles"/>
+        <meta name="calibre:series_index" content="1"/>
+        </metadata><manifest>
+        <item id="c1" href="text/c1.xhtml" media-type="application/xhtml+xml"/></manifest>
+        <spine><itemref idref="c1"/></spine></package>"""
+    ))
+    assertEquals("Dune Chronicles", epub.series)
+  }
+
+  @Test fun readsEpub3BelongsToCollectionSeriesWithType() {
+    val epub = Epub.read(book(
+      opf = """<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <dc:title>The Final Empire</dc:title><dc:creator>Brandon Sanderson</dc:creator>
+        <meta property="belongs-to-collection" id="c-set">Cosmere</meta>
+        <meta refines="#c-set" property="collection-type">set</meta>
+        <meta property="belongs-to-collection" id="c-series">Mistborn</meta>
+        <meta refines="#c-series" property="collection-type">series</meta>
+        </metadata><manifest>
+        <item id="c1" href="text/c1.xhtml" media-type="application/xhtml+xml"/></manifest>
+        <spine><itemref idref="c1"/></spine></package>"""
+    ))
+    assertEquals("Mistborn", epub.series)
+  }
+
+  @Test fun readsEpub3BelongsToCollectionWithoutType() {
+    val epub = Epub.read(book(
+      opf = """<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <dc:title>Foundation</dc:title><dc:creator>Isaac Asimov</dc:creator>
+        <meta property="belongs-to-collection" id="col1">Foundation Saga</meta>
+        </metadata><manifest>
+        <item id="c1" href="text/c1.xhtml" media-type="application/xhtml+xml"/></manifest>
+        <spine><itemref idref="c1"/></spine></package>"""
+    ))
+    assertEquals("Foundation Saga", epub.series)
+  }
+
+  @Test fun returnsNullWhenNoSeriesMetadata() {
+    val epub = Epub.read(book(
+      opf = """<package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <dc:title>Standalone</dc:title><dc:creator>Author</dc:creator>
+        </metadata><manifest>
+        <item id="c1" href="text/c1.xhtml" media-type="application/xhtml+xml"/></manifest>
+        <spine><itemref idref="c1"/></spine></package>"""
+    ))
+    assertNull(epub.series)
   }
 
   /** Minimal EPUB: container, OPF at OEBPS/content.opf, one chapter, plus [extra] files. */

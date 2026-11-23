@@ -58,6 +58,7 @@ class Epub private constructor(
   val title: String?,
   val author: String?,
   val language: String?,
+  val series: String? = null,
   val version: String?,
   /** Entry paths of the spine XHTML documents, in reading order. */
   val spine: List<String>,
@@ -143,11 +144,31 @@ class Epub private constructor(
         title = byLocal(opf, "title").firstOrNull()?.text(),
         author = byLocal(opf, "creator").firstOrNull()?.text(),
         language = byLocal(opf, "language").firstOrNull()?.text(),
+        series = extractSeries(opf),
         version = byLocal(opf, "package").firstOrNull()?.attr("version")?.takeIf { it.isNotBlank() },
         spine = spine,
         toc = navToc(entries, opfDir, manifest.values).ifEmpty { ncxToc(entries, opf, opfDir, manifest) },
         obfuscatedFonts = "META-INF/encryption.xml" in entries, // checkDrm already let only font obfuscation through
       )
+    }
+
+    private fun extractSeries(opf: Document): String? {
+      val metas = byLocal(opf, "meta")
+      val collectionTypes = metas
+        .filter { it.attr("property").trim() == "collection-type" && it.attr("refines").trim().startsWith("#") }
+        .associate { it.attr("refines").trim().removePrefix("#") to it.text().trim().lowercase() }
+
+      val collections = metas.filter { it.attr("property").trim() == "belongs-to-collection" && it.text().isNotBlank() }
+      val epub3Series = collections.firstOrNull { collectionTypes[it.attr("id").trim()] == "series" }
+        ?: collections.firstOrNull {
+          val id = it.attr("id").trim()
+          id.isBlank() || id !in collectionTypes
+        }
+      if (epub3Series != null) return epub3Series.text().trim()
+
+      return metas
+        .firstOrNull { it.attr("name").trim().equals("calibre:series", ignoreCase = true) && it.attr("content").isNotBlank() }
+        ?.attr("content")?.trim()
     }
 
     /** EPUB 3: the manifest item with properties="nav", then its <nav epub:type="toc">. */

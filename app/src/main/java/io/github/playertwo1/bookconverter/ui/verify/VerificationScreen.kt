@@ -22,13 +22,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface as M3Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +52,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.playertwo1.bookconverter.core.epub.Verification
 import io.github.playertwo1.bookconverter.data.Book
+import io.github.playertwo1.bookconverter.data.Series
+import io.github.playertwo1.bookconverter.data.suggestSeriesName
 import io.github.playertwo1.bookconverter.ui.PtBr
 import io.github.playertwo1.bookconverter.ui.count
 import io.github.playertwo1.bookconverter.ui.languageLabel
@@ -51,6 +61,7 @@ import io.github.playertwo1.bookconverter.ui.sizeLabel
 import io.github.playertwo1.bookconverter.ui.theme.Accent
 import io.github.playertwo1.bookconverter.ui.theme.Background
 import io.github.playertwo1.bookconverter.ui.theme.Danger
+import io.github.playertwo1.bookconverter.ui.theme.Field
 import io.github.playertwo1.bookconverter.ui.theme.Positive
 import io.github.playertwo1.bookconverter.ui.theme.Serif
 import io.github.playertwo1.bookconverter.ui.theme.Stroke
@@ -95,13 +106,26 @@ fun VerificationScreen(bookId: Long, onBack: () -> Unit, onStartTranslation: (Lo
                 Text("Verificando…", color = TextSecondary)
             }
             is VerifyState.Failed -> Text(s.message, color = Danger, modifier = Modifier.padding(top = 24.dp))
-            is VerifyState.Ready -> ReadyContent(s.book, s.v, onStartTranslation)
+            is VerifyState.Ready -> ReadyContent(
+                book = s.book,
+                v = s.v,
+                series = s.series,
+                onStartTranslation = onStartTranslation,
+                onCreateSeries = vm::createSeriesForBook,
+            )
         }
     }
 }
 
 @Composable
-private fun ReadyContent(book: Book, v: Verification, onStartTranslation: (Long) -> Unit) {
+private fun ReadyContent(
+    book: Book,
+    v: Verification,
+    series: Series?,
+    onStartTranslation: (Long) -> Unit,
+    onCreateSeries: (String, String?) -> Unit,
+) {
+    var showCreateSeriesDialog by rememberSaveable(book.id) { mutableStateOf(false) }
     Spacer(Modifier.height(16.dp))
     Card {
         Box(Modifier.size(8.dp).clip(CircleShape).background(Accent))
@@ -153,6 +177,13 @@ private fun ReadyContent(book: Book, v: Verification, onStartTranslation: (Long)
         title = "Direitos de acesso",
         detail = if (v.obfuscatedFonts) "Sem DRM · fontes ofuscadas (permitido)" else "Sem DRM detectado",
     )
+    if (series != null) {
+        CheckCard(
+            ok = true,
+            title = "Série vinculada",
+            detail = listOfNotNull(series.name, series.author?.takeIf { it.isNotBlank() }).joinToString(" · "),
+        )
+    }
     Button(
         onClick = { onStartTranslation(book.id) },
         modifier = Modifier.padding(top = 16.dp).fillMaxWidth().height(56.dp),
@@ -161,7 +192,126 @@ private fun ReadyContent(book: Book, v: Verification, onStartTranslation: (Long)
     ) {
         Text("Nova tradução", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
     }
+    if (series == null) {
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(
+            onClick = { showCreateSeriesDialog = true },
+            modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Stroke),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+        ) {
+            Text("Criar série com este livro", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        }
+    }
     Spacer(Modifier.height(24.dp))
+
+    if (showCreateSeriesDialog) {
+        CreateBookSeriesDialog(
+            initialName = suggestSeriesName(book.title),
+            initialAuthor = book.author.orEmpty(),
+            onConfirm = { name, author ->
+                showCreateSeriesDialog = false
+                onCreateSeries(name, author)
+            },
+            onDismiss = { showCreateSeriesDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun CreateBookSeriesDialog(
+    initialName: String,
+    initialAuthor: String,
+    onConfirm: (String, String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    var author by rememberSaveable(initialAuthor) { mutableStateOf(initialAuthor) }
+    var showError by rememberSaveable { mutableStateOf(false) }
+
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = Accent,
+        unfocusedBorderColor = Stroke,
+        focusedTextColor = TextPrimary,
+        unfocusedTextColor = TextPrimary,
+        focusedLabelColor = TextSecondary,
+        unfocusedLabelColor = TextSecondary,
+        focusedContainerColor = Field,
+        unfocusedContainerColor = Field,
+        cursorColor = Accent,
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface,
+        title = {
+            Text(
+                text = "Nova série",
+                fontFamily = Serif,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+            )
+        },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        name = it
+                        showError = false
+                    },
+                    label = { Text("Nome da série") },
+                    singleLine = true,
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = showError && name.isBlank(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = author,
+                    onValueChange = { author = it },
+                    label = { Text("Autor (opcional)") },
+                    singleLine = true,
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (showError) {
+                    Text(
+                        text = "O nome da série é obrigatório.",
+                        color = Danger,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        onConfirm(name.trim(), author.trim().ifEmpty { null })
+                    } else {
+                        showError = true
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+            ) {
+                Text("Criar")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+            ) {
+                Text("Cancelar")
+            }
+        },
+    )
 }
 
 @Composable

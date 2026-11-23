@@ -83,21 +83,32 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
         _message.value = null
     }
 
-    fun createSeries(name: String, styleNotes: String = "", onCreated: (Long) -> Unit = {}) {
+    fun createSeries(
+        name: String,
+        author: String? = null,
+        styleNotes: String = "",
+        linkBookId: Long? = null,
+        onCreated: (Long) -> Unit = {},
+    ) {
         val trimmedName = name.trim()
         if (trimmedName.isEmpty()) return
+        val cleanAuthor = author?.trim()?.ifEmpty { null }
         viewModelScope.launch {
             try {
                 val now = System.currentTimeMillis()
                 val id = seriesDao.insertSeries(
                     Series(
                         name = trimmedName,
+                        author = cleanAuthor,
                         styleNotes = styleNotes.trim(),
                         glossaryVersion = 1,
                         createdAt = now,
                         updatedAt = now,
                     )
                 )
+                if (linkBookId != null) {
+                    bookDao.setSeries(linkBookId, id)
+                }
                 _selectedSeriesId.value = id
                 _message.value = "Série \"$trimmedName\" criada."
                 onCreated(id)
@@ -107,15 +118,17 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun updateSeries(seriesId: Long, name: String, styleNotes: String) {
+    fun updateSeries(seriesId: Long, name: String, author: String?, styleNotes: String) {
         viewModelScope.launch {
             try {
                 val current = seriesDao.byId(seriesId) ?: return@launch
                 val trimmedName = name.trim().ifEmpty { current.name }
+                val cleanAuthor = author?.trim()?.ifEmpty { null }
                 val now = System.currentTimeMillis()
                 seriesDao.updateSeries(
                     current.copy(
                         name = trimmedName,
+                        author = cleanAuthor,
                         styleNotes = styleNotes.trim(),
                         updatedAt = now,
                     )

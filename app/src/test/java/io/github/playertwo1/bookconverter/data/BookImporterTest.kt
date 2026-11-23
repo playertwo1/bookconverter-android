@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Rule
@@ -40,6 +41,72 @@ class BookImporterTest {
         override suspend fun setBookSeries(bookId: Long, seriesId: Long?) = setSeries(bookId, seriesId)
         override fun observeBySeries(seriesId: Long): Flow<List<Book>> = flowOf(rows.filter { it.seriesId == seriesId })
         override suspend fun booksInSeries(seriesId: Long): List<Book> = rows.filter { it.seriesId == seriesId }
+    }
+
+    private class FakeSeriesDao : SeriesDao {
+        val rows = mutableListOf<Series>()
+        private var nextId = 1L
+
+        override fun observeAllSummaries(): Flow<List<SeriesSummary>> = flowOf(emptyList())
+        override fun observeAll(): Flow<List<Series>> = flowOf(rows)
+        override fun observeById(seriesId: Long): Flow<Series?> = flowOf(rows.firstOrNull { it.id == seriesId })
+        override suspend fun byId(seriesId: Long): Series? = rows.firstOrNull { it.id == seriesId }
+        override suspend fun findByNameIgnoreCase(name: String): Series? =
+            rows.firstOrNull { it.name.trim().equals(name.trim(), ignoreCase = true) }
+
+        override suspend fun insertSeries(series: Series): Long {
+            val id = nextId++
+            rows += series.copy(id = id)
+            return id
+        }
+
+        override suspend fun updateSeries(series: Series) {
+            val idx = rows.indexOfFirst { it.id == series.id }
+            if (idx >= 0) rows[idx] = series
+        }
+
+        override suspend fun bumpGlossaryVersion(seriesId: Long, updatedAt: Long) {}
+        override suspend fun unlinkBooksFromSeries(seriesId: Long) {}
+        override suspend fun deleteSeriesById(seriesId: Long) { rows.removeAll { it.id == seriesId } }
+        override fun observeGlossary(seriesId: Long): Flow<List<GlossaryEntry>> = flowOf(emptyList())
+        override suspend fun glossaryForSeries(seriesId: Long): List<GlossaryEntry> = emptyList()
+        override suspend fun upsertGlossaryEntry(entry: GlossaryEntry): Long = 0L
+        override suspend fun deleteGlossaryEntryById(entryId: Long) {}
+        override suspend fun upsertGlossaryEntries(entries: List<GlossaryEntry>): List<Long> = emptyList()
+        override fun observeMemoryEntries(seriesId: Long): Flow<List<SeriesMemoryEntry>> = flowOf(emptyList())
+        override suspend fun approvedMemoryForSeries(seriesId: Long): List<SeriesMemoryEntry> = emptyList()
+        override suspend fun memoryEntryById(entryId: Long): SeriesMemoryEntry? = null
+        override suspend fun insertMemoryEntries(entries: List<SeriesMemoryEntry>) {}
+        override suspend fun updateMemoryStatus(entryId: Long, status: String, targetTerm: String, updatedAt: Long) {}
+        override suspend fun deleteMemoryEntry(entryId: Long) {}
+    }
+
+    private fun createSyntheticEpub(
+        title: String,
+        author: String? = null,
+        seriesMetaXml: String = "",
+        bodyText: String = "Chapter one content.",
+    ): ByteArray {
+        val bos = ByteArrayOutputStream()
+        val authorXml = if (author != null) "<dc:creator>$author</dc:creator>" else ""
+        ZipOutputStream(bos).use { zip ->
+            zip.putNextEntry(ZipEntry("mimetype"))
+            zip.write("application/epub+zip".toByteArray())
+            zip.closeEntry()
+
+            zip.putNextEntry(ZipEntry("META-INF/container.xml"))
+            zip.write("""<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""".toByteArray())
+            zip.closeEntry()
+
+            zip.putNextEntry(ZipEntry("OEBPS/content.opf"))
+            zip.write("""<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>$title</dc:title>$authorXml<dc:language>en</dc:language><dc:identifier id="id">$title</dc:identifier>$seriesMetaXml</metadata><manifest><item id="p1" href="part.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="p1"/></spine></package>""".toByteArray())
+            zip.closeEntry()
+
+            zip.putNextEntry(ZipEntry("OEBPS/part.xhtml"))
+            zip.write("""<html xmlns="http://www.w3.org/1999/xhtml"><body><p>$bodyText</p></body></html>""".toByteArray())
+            zip.closeEntry()
+        }
+        return bos.toByteArray()
     }
 
     private fun createSyntheticMobi(version: Int, encryption: Int, record0Offset: Int = 82): ByteArray {
@@ -288,6 +355,93 @@ class BookImporterTest {
 
         assertEquals(0, dao.rows.size)
         assertEquals(0, dir.list()!!.size)
+    }
+
+    @Test fun autoCreatesSeriesFromEpubMetadataWithAuthor() = runBlocking {
+        val dir = tmp.newFolder("books")
+        val bookDao = FakeDao()
+        val seriesDao = FakeSeriesDao()
+        val epubBytes = createSyntheticEpub(
+            title = "O Nome do Vento",
+            author = "Patrick Rothfuss",
+            seriesMetaXml = """<meta name="calibre:series" content="A Crônica do Matador do Rei"/>""",
+        )
+
+        val res = importEpub(
+            input = epubBytes.inputStream(),
+            sourceName = "nome_do_vento.epub",
+            booksDir = dir,
+            dao = bookDao,
+            seriesDao = seriesDao,
+        )
+
+        assertEquals("A Crônica do Matador do Rei", res.linkedSeriesName)
+        assertEquals(1, seriesDao.rows.size)
+        val createdSeries = seriesDao.rows.first()
+        assertEquals("A Crônica do Matador do Rei", createdSeries.name)
+        assertEquals("Patrick Rothfuss", createdSeries.author)
+        assertEquals(createdSeries.id, res.book.seriesId)
+    }
+
+    @Test fun reusesExistingSeriesIgnoreCaseAndFillsBlankAuthor() = runBlocking {
+        val dir = tmp.newFolder("books")
+        val bookDao = FakeDao()
+        val seriesDao = FakeSeriesDao()
+        val existingId = seriesDao.insertSeries(
+            Series(
+                name = "Mistborn",
+                author = null,
+                createdAt = 100L,
+                updatedAt = 100L,
+            )
+        )
+        val epubBytes = createSyntheticEpub(
+            title = "The Well of Ascension",
+            author = "Brandon Sanderson",
+            seriesMetaXml = """<meta property="belongs-to-collection" id="col1">  mistborn  </meta><meta refines="#col1" property="collection-type">series</meta>""",
+            bodyText = "Book two content.",
+        )
+
+        val res = importEpub(
+            input = epubBytes.inputStream(),
+            sourceName = "mistborn2.epub",
+            booksDir = dir,
+            dao = bookDao,
+            seriesDao = seriesDao,
+        )
+
+        assertEquals(1, seriesDao.rows.size)
+        assertEquals(existingId, res.book.seriesId)
+        assertEquals("Mistborn", res.linkedSeriesName)
+        assertEquals("Brandon Sanderson", seriesDao.byId(existingId)?.author)
+    }
+
+    @Test fun epubWithoutSeriesMetadataDoesNotCreateSeries() = runBlocking {
+        val dir = tmp.newFolder("books")
+        val bookDao = FakeDao()
+        val seriesDao = FakeSeriesDao()
+        val epubBytes = createSyntheticEpub(title = "Standalone Book", author = "Some Author")
+
+        val res = importEpub(
+            input = epubBytes.inputStream(),
+            sourceName = "standalone.epub",
+            booksDir = dir,
+            dao = bookDao,
+            seriesDao = seriesDao,
+        )
+
+        assertNull(res.book.seriesId)
+        assertNull(res.linkedSeriesName)
+        assertEquals(0, seriesDao.rows.size)
+    }
+
+    @Test fun suggestSeriesNameStripsTrailingVolumeMarkersOnly() {
+        assertEquals("Duna", suggestSeriesName("Duna - Livro 1"))
+        assertEquals("Mistborn", suggestSeriesName("Mistborn (Vol. 2)"))
+        assertEquals("Foundation", suggestSeriesName("Foundation #3"))
+        assertEquals("Saga", suggestSeriesName("Saga: Book 4"))
+        assertEquals("O Hobbit", suggestSeriesName("O Hobbit"))
+        assertEquals("1984", suggestSeriesName("1984"))
     }
 }
 
