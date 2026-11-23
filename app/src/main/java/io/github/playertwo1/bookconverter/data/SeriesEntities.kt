@@ -141,6 +141,9 @@ interface SeriesDao {
     @Query("SELECT * FROM Series WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
     suspend fun findByNameIgnoreCase(name: String): Series?
 
+    @Query("SELECT * FROM Series WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) ORDER BY id ASC")
+    suspend fun findAllByNameIgnoreCase(name: String): List<Series>
+
     @Insert
     suspend fun insertSeries(series: Series): Long
 

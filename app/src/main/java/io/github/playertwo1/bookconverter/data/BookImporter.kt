@@ -12,6 +12,7 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
+import java.util.Locale
 
 class ImportResult(
     val book: Book,
@@ -81,6 +82,35 @@ internal fun defaultConvertMobi(source: File, targetEpub: File): MobiConvertedMe
     }
 }
 
+private val WHITESPACE_RUN = Regex("\\s+")
+
+private fun normalizeAuthor(author: String?): String? =
+    author?.trim()?.replace(WHITESPACE_RUN, " ")?.takeIf { it.isNotEmpty() }?.lowercase(Locale.ROOT)
+
+/**
+ * Picks an existing series from homonymous candidates only when the author match is unambiguous.
+ * Leaves conflicting or ambiguous cases unlinked (null) so the user can choose before translating.
+ */
+internal suspend fun matchExistingSeriesForAuthor(
+    matches: List<Series>,
+    cleanAuthor: String?,
+    seriesDao: SeriesDao,
+    now: Long,
+): Series? {
+    if (matches.isEmpty()) return null
+    val bookAuthorNorm = normalizeAuthor(cleanAuthor)
+    if (bookAuthorNorm != null) {
+        val exactAuthorMatches = matches.filter { normalizeAuthor(it.author) == bookAuthorNorm }
+        if (exactAuthorMatches.size == 1) return exactAuthorMatches.single()
+        if (exactAuthorMatches.size > 1) return null
+        if (matches.size == 1 && normalizeAuthor(matches.single().author) == null) {
+            return matches.single().copy(author = cleanAuthor, updatedAt = now).also { seriesDao.updateSeries(it) }
+        }
+        return null
+    }
+    return matches.filter { normalizeAuthor(it.author) == null }.singleOrNull()
+}
+
 private suspend fun resolveOrCreateSeries(
     seriesName: String?,
     author: String?,
@@ -90,13 +120,9 @@ private suspend fun resolveOrCreateSeries(
     if (seriesDao == null || seriesName.isNullOrBlank()) return null
     val cleanName = seriesName.trim()
     val cleanAuthor = author?.trim()?.takeIf { it.isNotEmpty() }
-    val existing = seriesDao.findByNameIgnoreCase(cleanName)
-    if (existing != null) {
-        return if (existing.author.isNullOrBlank() && cleanAuthor != null) {
-            existing.copy(author = cleanAuthor, updatedAt = now).also { seriesDao.updateSeries(it) }
-        } else {
-            existing
-        }
+    val matches = seriesDao.findAllByNameIgnoreCase(cleanName)
+    if (matches.isNotEmpty()) {
+        return matchExistingSeriesForAuthor(matches, cleanAuthor, seriesDao, now)
     }
     val created = Series(
         name = cleanName,
