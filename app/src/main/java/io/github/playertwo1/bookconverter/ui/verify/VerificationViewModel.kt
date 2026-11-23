@@ -9,6 +9,7 @@ import io.github.playertwo1.bookconverter.core.epub.Verification
 import io.github.playertwo1.bookconverter.data.AppDatabase
 import io.github.playertwo1.bookconverter.data.Book
 import io.github.playertwo1.bookconverter.data.Series
+import io.github.playertwo1.bookconverter.data.matchExistingSeriesForAuthor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,24 +56,19 @@ class VerificationViewModel(app: Application, private val bookId: Long) : Androi
         viewModelScope.launch {
             val linked = withContext(Dispatchers.IO) {
                 val now = System.currentTimeMillis()
-                val existing = seriesDao.findByNameIgnoreCase(cleanName)
-                val series = if (existing != null) {
-                    if (existing.author.isNullOrBlank() && cleanAuthor != null) {
-                        existing.copy(author = cleanAuthor, updatedAt = now).also { seriesDao.updateSeries(it) }
-                    } else {
-                        existing
+                val matches = seriesDao.findAllByNameIgnoreCase(cleanName)
+                val series = matchExistingSeriesForAuthor(matches, cleanAuthor, seriesDao, now)
+                    ?: run {
+                        val created = Series(
+                            name = cleanName,
+                            author = cleanAuthor,
+                            styleNotes = "",
+                            glossaryVersion = 1,
+                            createdAt = now,
+                            updatedAt = now,
+                        )
+                        created.copy(id = seriesDao.insertSeries(created))
                     }
-                } else {
-                    val created = Series(
-                        name = cleanName,
-                        author = cleanAuthor,
-                        styleNotes = "",
-                        glossaryVersion = 1,
-                        createdAt = now,
-                        updatedAt = now,
-                    )
-                    created.copy(id = seriesDao.insertSeries(created))
-                }
                 dao.setSeries(bookId, series.id)
                 series
             }

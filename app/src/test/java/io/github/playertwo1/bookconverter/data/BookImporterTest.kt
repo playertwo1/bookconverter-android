@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -53,6 +55,9 @@ class BookImporterTest {
         override suspend fun byId(seriesId: Long): Series? = rows.firstOrNull { it.id == seriesId }
         override suspend fun findByNameIgnoreCase(name: String): Series? =
             rows.firstOrNull { it.name.trim().equals(name.trim(), ignoreCase = true) }
+
+        override suspend fun findAllByNameIgnoreCase(name: String): List<Series> =
+            rows.filter { it.name.trim().equals(name.trim(), ignoreCase = true) }.sortedBy { it.id }
 
         override suspend fun insertSeries(series: Series): Long {
             val id = nextId++
@@ -433,6 +438,168 @@ class BookImporterTest {
         assertNull(res.book.seriesId)
         assertNull(res.linkedSeriesName)
         assertEquals(0, seriesDao.rows.size)
+    }
+
+    @Test fun homonymousSeriesFromDifferentAuthorsDoesNotAutoLinkAcrossImportPaths() = runBlocking {
+        val seriesMeta = """<meta name="calibre:series" content="The Shattered Realm"/>"""
+        val firstEpub = createSyntheticEpub(
+            title = "Shadows of the Crown",
+            author = "Alice Vance",
+            seriesMetaXml = seriesMeta,
+            bodyText = "Alice book one.",
+        )
+        val secondEpub = createSyntheticEpub(
+            title = "Ashes of the Empire",
+            author = "Bob Mercer",
+            seriesMetaXml = seriesMeta,
+            bodyText = "Bob book one.",
+        )
+        val mobiBytes = createSyntheticMobi(version = 6, encryption = 0)
+
+        // 1. Entrada EPUB (importEpub)
+        val epubDir = tmp.newFolder("books-epub-collision")
+        val epubBookDao = FakeDao()
+        val epubSeriesDao = FakeSeriesDao()
+        val firstEpubRes = importEpub(firstEpub.inputStream(), "alice.epub", epubDir, epubBookDao, seriesDao = epubSeriesDao)
+        val secondEpubRes = importEpub(secondEpub.inputStream(), "bob.epub", epubDir, epubBookDao, seriesDao = epubSeriesDao)
+
+        val aliceEpubSeriesId = firstEpubRes.book.seriesId
+        assertNotNull(aliceEpubSeriesId)
+        assertNotEquals(aliceEpubSeriesId, secondEpubRes.book.seriesId)
+        assertNull(secondEpubRes.book.seriesId)
+        assertNull(secondEpubRes.linkedSeriesName)
+        assertEquals(1, epubSeriesDao.rows.size)
+        assertEquals("Alice Vance", epubSeriesDao.byId(aliceEpubSeriesId!!)?.author)
+
+        // 2. Entrada MOBI via importBook (reaproveitando as mesmas fixtures EPUB)
+        val mobiDir = tmp.newFolder("books-mobi-collision")
+        val mobiBookDao = FakeDao()
+        val mobiSeriesDao = FakeSeriesDao()
+        val firstMobiRes = importBook(firstEpub.inputStream(), "alice.epub", mobiDir, mobiBookDao, seriesDao = mobiSeriesDao)
+        val secondMobiRes = importBook(
+            input = mobiBytes.inputStream(),
+            sourceName = "bob.mobi",
+            booksDir = mobiDir,
+            dao = mobiBookDao,
+            mobiToEpub = { _, target ->
+                target.writeBytes(secondEpub)
+                MobiConvertedMeta("MOBI", "Ashes of the Empire", "Bob Mercer", "en")
+            },
+            seriesDao = mobiSeriesDao,
+        )
+
+        val aliceMobiSeriesId = firstMobiRes.book.seriesId
+        assertNotNull(aliceMobiSeriesId)
+        assertNotEquals(aliceMobiSeriesId, secondMobiRes.book.seriesId)
+        assertNull(secondMobiRes.book.seriesId)
+        assertNull(secondMobiRes.linkedSeriesName)
+        assertEquals(1, mobiSeriesDao.rows.size)
+        assertEquals("Alice Vance", mobiSeriesDao.byId(aliceMobiSeriesId!!)?.author)
+    }
+
+    @Test fun reusesExistingSeriesWhenNameAndAuthorMatchIgnoreCase() = runBlocking {
+        val dir = tmp.newFolder("books-same-author")
+        val bookDao = FakeDao()
+        val seriesDao = FakeSeriesDao()
+        val book1 = createSyntheticEpub(
+            title = "Mistborn 1",
+            author = "Brandon Sanderson",
+            seriesMetaXml = """<meta name="calibre:series" content="Mistborn"/>""",
+            bodyText = "Book one content.",
+        )
+        val book2 = createSyntheticEpub(
+            title = "Mistborn 2",
+            author = "  brandon   sanderson ",
+            seriesMetaXml = """<meta name="calibre:series" content="  MISTBORN "/>""",
+            bodyText = "Book two content.",
+        )
+
+        val first = importEpub(book1.inputStream(), "m1.epub", dir, bookDao, seriesDao = seriesDao)
+        val second = importEpub(book2.inputStream(), "m2.epub", dir, bookDao, seriesDao = seriesDao)
+
+        assertNotNull(first.book.seriesId)
+        assertEquals(first.book.seriesId, second.book.seriesId)
+        assertEquals("Mistborn", second.linkedSeriesName)
+        assertEquals(1, seriesDao.rows.size)
+    }
+
+    @Test fun selectsMatchingHomonymousSeriesRegardlessOfRowOrder() = runBlocking {
+        val dir = tmp.newFolder("books-multi-homonymous")
+        val bookDao = FakeDao()
+        val seriesDao = FakeSeriesDao()
+        val aliceId = seriesDao.insertSeries(
+            Series(name = "The Shattered Realm", author = "Alice Vance", createdAt = 100L, updatedAt = 100L)
+        )
+        val bobId = seriesDao.insertSeries(
+            Series(name = "The Shattered Realm", author = "Bob Mercer", createdAt = 200L, updatedAt = 200L)
+        )
+
+        val bobBook = createSyntheticEpub(
+            title = "Ashes of the Empire",
+            author = "bob mercer",
+            seriesMetaXml = """<meta name="calibre:series" content="The Shattered Realm"/>""",
+            bodyText = "Bob book two.",
+        )
+        val carolBook = createSyntheticEpub(
+            title = "Tides of Glass",
+            author = "Carol Thorne",
+            seriesMetaXml = """<meta name="calibre:series" content="The Shattered Realm"/>""",
+            bodyText = "Carol book one.",
+        )
+
+        val bobRes = importEpub(bobBook.inputStream(), "bob2.epub", dir, bookDao, seriesDao = seriesDao)
+        val carolRes = importEpub(carolBook.inputStream(), "carol1.epub", dir, bookDao, seriesDao = seriesDao)
+
+        assertEquals(bobId, bobRes.book.seriesId)
+        assertNotEquals(aliceId, bobRes.book.seriesId)
+        assertEquals("The Shattered Realm", bobRes.linkedSeriesName)
+
+        assertNull(carolRes.book.seriesId)
+        assertNull(carolRes.linkedSeriesName)
+        assertEquals(2, seriesDao.rows.size)
+    }
+
+    @Test fun leavesBookUnlinkedWhenHomonymousMatchIsAmbiguousOrAuthorMissing() = runBlocking {
+        val seriesMeta = """<meta name="calibre:series" content="Chronicles"/>"""
+        val bobBook = createSyntheticEpub(
+            title = "Bob Volume",
+            author = "Bob Mercer",
+            seriesMetaXml = seriesMeta,
+            bodyText = "Bob text.",
+        )
+        val authorlessBook = createSyntheticEpub(
+            title = "Unknown Author Volume",
+            author = null,
+            seriesMetaXml = seriesMeta,
+            bodyText = "Authorless text.",
+        )
+
+        // 1. Duas séries homônimas do mesmo autor -> ambíguo, deixa sem vínculo
+        val dupDao = FakeSeriesDao().apply {
+            insertSeries(Series(name = "Chronicles", author = "Bob Mercer", createdAt = 1L, updatedAt = 1L))
+            insertSeries(Series(name = "Chronicles", author = "Bob Mercer", createdAt = 2L, updatedAt = 2L))
+        }
+        val dupRes = importEpub(bobBook.inputStream(), "bob_dup.epub", tmp.newFolder("ambig-dup"), FakeDao(), seriesDao = dupDao)
+        assertNull(dupRes.book.seriesId)
+        assertNull(dupRes.linkedSeriesName)
+
+        // 2. Uma série de outro autor + uma sem autor -> não preenche autor em branco sob ambiguidade
+        val mixedDao = FakeSeriesDao().apply {
+            insertSeries(Series(name = "Chronicles", author = "Alice Vance", createdAt = 1L, updatedAt = 1L))
+            insertSeries(Series(name = "Chronicles", author = null, createdAt = 2L, updatedAt = 2L))
+        }
+        val mixedRes = importEpub(bobBook.inputStream(), "bob_mixed.epub", tmp.newFolder("ambig-mixed"), FakeDao(), seriesDao = mixedDao)
+        assertNull(mixedRes.book.seriesId)
+        assertNull(mixedRes.linkedSeriesName)
+        assertNull(mixedDao.byId(2L)?.author)
+
+        // 3. Série com autor conhecido + livro sem autor -> não vincula automaticamente
+        val knownAuthorDao = FakeSeriesDao().apply {
+            insertSeries(Series(name = "Chronicles", author = "Alice Vance", createdAt = 1L, updatedAt = 1L))
+        }
+        val authorlessRes = importEpub(authorlessBook.inputStream(), "noauthor.epub", tmp.newFolder("ambig-noauthor"), FakeDao(), seriesDao = knownAuthorDao)
+        assertNull(authorlessRes.book.seriesId)
+        assertNull(authorlessRes.linkedSeriesName)
     }
 
     @Test fun suggestSeriesNameStripsTrailingVolumeMarkersOnly() {
