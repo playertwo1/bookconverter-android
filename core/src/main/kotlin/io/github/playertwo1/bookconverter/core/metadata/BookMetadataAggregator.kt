@@ -77,7 +77,10 @@ class BookMetadataAggregator(
       .filterIsInstance<SourceSearchResult.Success>()
       .flatMap { it.candidates }
 
-    val merged = mergeCandidates(allCandidates)
+    val requestedEdition = editionIsbn(query.normalizedIsbn)
+    val merged = mergeCandidates(allCandidates).sortedByDescending {
+      requestedEdition != null && editionIsbn(it.value(MetadataField.ISBN)) == requestedEdition
+    }
     AggregatedSearchResponse(
       candidates = merged,
       sourceResults = results,
@@ -107,10 +110,18 @@ class BookMetadataAggregator(
     )
 
     fun mergeCandidates(raw: List<SourceBookCandidate>): List<AggregatedBookCandidate> {
-      if (raw.isEmpty()) return emptyList()
+      val byIsbn = raw.groupBy { editionIsbn(it.isbn) }
+      val editions = byIsbn.filterKeys { it != null }.values.toList()
+      val workMatches = editions.map { mutableListOf<SourceBookCandidate>() }
       val groups = mutableListOf<MutableList<SourceBookCandidate>>()
-      for (candidate in raw) {
-        val target = groups.firstOrNull { group -> group.any { existing -> isSameBook(existing, candidate) } }
+      for (candidate in byIsbn[null].orEmpty()) {
+        // Only match against the edition records themselves. A work record cannot link two editions.
+        val matches = editions.indices.filter { idx -> editions[idx].any { isSameWork(it, candidate) } }
+        if (matches.isNotEmpty()) {
+          matches.forEach { workMatches[it] += candidate }
+          continue
+        }
+        val target = groups.firstOrNull { group -> group.any { isSameWork(it, candidate) } }
         if (target != null) {
           target += candidate
         } else {
@@ -118,18 +129,17 @@ class BookMetadataAggregator(
         }
       }
 
-      return groups.mapIndexed { idx, group -> buildAggregated("cand-$idx", group) }
+      return (editions + groups).mapIndexed { idx, group ->
+        buildAggregated("cand-$idx", group, workMatches.getOrNull(idx).orEmpty())
+      }
         .sortedWith(
           compareByDescending<AggregatedBookCandidate> { it.sources.size }
             .thenByDescending { it.fields.size }
         )
     }
 
-    private fun isSameBook(a: SourceBookCandidate, b: SourceBookCandidate): Boolean {
+    private fun isSameWork(a: SourceBookCandidate, b: SourceBookCandidate): Boolean {
       if (a.source == b.source) return false
-      val isbnA = normalizeIsbn(a.isbn)
-      val isbnB = normalizeIsbn(b.isbn)
-      if (isbnA != null && isbnB != null && isbnA == isbnB) return true
 
       if (a.openLibraryKey != null && b.openLibraryKey != null && a.openLibraryKey == b.openLibraryKey) return true
       if (a.wikidataQid != null && b.wikidataQid != null && a.wikidataQid == b.wikidataQid) return true
@@ -148,8 +158,13 @@ class BookMetadataAggregator(
       return authorA == null && authorB == null
     }
 
-    private fun buildAggregated(id: String, group: List<SourceBookCandidate>): AggregatedBookCandidate {
+    private fun buildAggregated(
+      id: String,
+      group: List<SourceBookCandidate>,
+      workMatches: List<SourceBookCandidate>,
+    ): AggregatedBookCandidate {
       val fields = linkedMapOf<MetadataField, FieldProposal>()
+      val workRecords = group + workMatches
 
       fun addField(
         field: MetadataField,
@@ -157,8 +172,9 @@ class BookMetadataAggregator(
         extractor: (SourceBookCandidate) -> String?,
         normalizer: (String) -> String = { normalizeCompareValue(it) },
         preferLongerSummary: Boolean = false,
+        records: List<SourceBookCandidate> = group,
       ) {
-        val rawOptions = group.mapNotNull { c ->
+        val rawOptions = records.mapNotNull { c ->
           if (c.source !in priority) return@mapNotNull null
           val rawVal = extractor(c)?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
           val finalVal = when (field) {
@@ -200,30 +216,49 @@ class BookMetadataAggregator(
 
       addField(MetadataField.TITLE, PRIORITY_DEFAULT, { it.title })
       addField(MetadataField.AUTHOR, PRIORITY_DEFAULT, { it.author })
-      addField(MetadataField.ISBN, PRIORITY_DEFAULT, { it.isbn }, normalizer = { normalizeIsbn(it) ?: normalizeCompareValue(it) })
+      addField(MetadataField.ISBN, PRIORITY_DEFAULT, { it.isbn }, normalizer = { editionIsbn(it) ?: normalizeCompareValue(it) })
       addField(MetadataField.PUBLISHER, PRIORITY_DEFAULT, { it.publisher })
       addField(MetadataField.PUBLISHED_DATE, PRIORITY_DEFAULT, { it.publishedDate }, normalizer = { extractYear(it) ?: normalizeCompareValue(it) })
       addField(MetadataField.LANGUAGE, PRIORITY_DEFAULT, { it.language })
-      addField(MetadataField.SUMMARY, PRIORITY_SUMMARY, { it.summary }, preferLongerSummary = true)
-      addField(MetadataField.SERIES_NAME, PRIORITY_SERIES, { it.seriesName })
-      addField(MetadataField.SERIES_POSITION, PRIORITY_SERIES_POSITION, { it.seriesPosition }, normalizer = { normalizeSeriesPosition(it) ?: it })
-      addField(MetadataField.SERIES_SUMMARY, PRIORITY_SERIES, { it.seriesSummary }, preferLongerSummary = true)
+      addField(MetadataField.SUMMARY, PRIORITY_SUMMARY, { it.summary }, preferLongerSummary = true, records = workRecords)
+      addField(MetadataField.SERIES_NAME, PRIORITY_SERIES, { it.seriesName }, records = workRecords)
+      addField(MetadataField.SERIES_POSITION, PRIORITY_SERIES_POSITION, { it.seriesPosition }, normalizer = { normalizeSeriesPosition(it) ?: it }, records = workRecords)
+      addField(MetadataField.SERIES_SUMMARY, PRIORITY_SERIES, { it.seriesSummary }, preferLongerSummary = true, records = workRecords)
 
       return AggregatedBookCandidate(
         id = id,
-        sources = group.map { it.source }.toSet(),
+        sources = workRecords.map { it.source }.toSet(),
         fields = fields,
         openLibraryKey = group.firstNotNullOfOrNull { it.openLibraryKey },
         wikidataQid = group.firstNotNullOfOrNull { it.wikidataQid },
         hardcoverId = group.firstNotNullOfOrNull { it.hardcoverId },
-        seriesOpenLibraryKey = group.firstNotNullOfOrNull { it.seriesOpenLibraryKey },
-        seriesWikidataQid = group.firstNotNullOfOrNull { it.seriesWikidataQid },
-        seriesHardcoverId = group.firstNotNullOfOrNull { it.seriesHardcoverId },
-        characters = mergeNamedItems(emptyList(), group.flatMap { it.characters }),
-        places = mergeNamedItems(emptyList(), group.flatMap { it.places }),
+        seriesOpenLibraryKey = workRecords.firstNotNullOfOrNull { it.seriesOpenLibraryKey },
+        seriesWikidataQid = workRecords.firstNotNullOfOrNull { it.seriesWikidataQid },
+        seriesHardcoverId = workRecords.firstNotNullOfOrNull { it.seriesHardcoverId },
+        characters = mergeNamedItems(emptyList(), workRecords.flatMap { it.characters }),
+        places = mergeNamedItems(emptyList(), workRecords.flatMap { it.places }),
       )
     }
   }
+}
+
+private fun editionIsbn(raw: String?): String? {
+  val isbn = normalizeIsbn(raw) ?: return null
+  if (isbn.length == 13) {
+    if (!isbn.startsWith("978") && !isbn.startsWith("979")) return null
+    return isbn.takeIf { isbn13CheckDigit(it.take(12)) == it.last().digitToInt() }
+  }
+  val checksum = isbn.mapIndexed { index, digit ->
+    (10 - index) * (if (digit == 'X') 10 else digit.digitToInt())
+  }.sum()
+  if (checksum % 11 != 0) return null
+  val prefix = "978" + isbn.take(9)
+  return prefix + isbn13CheckDigit(prefix)
+}
+
+private fun isbn13CheckDigit(prefix: String): Int {
+  val sum = prefix.mapIndexed { index, digit -> digit.digitToInt() * (if (index % 2 == 0) 1 else 3) }.sum()
+  return (10 - sum % 10) % 10
 }
 
 private val NON_ALNUM_REGEX = Regex("[^\\p{L}\\p{N}]+")

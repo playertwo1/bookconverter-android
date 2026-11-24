@@ -13,4 +13,8 @@ Este problema é distinto do vínculo de séries homônimas corrigido no PR #1. 
 3. Cubra ISBN-10 e ISBN-13 equivalentes, o mesmo ISBN vindo de várias fontes, busca sem ISBN e duas edições distintas. Em uma busca por ISBN, confirme que a edição exata é identificável e não ganha editora ou data incompatível. Preserve o enriquecimento útil de nível de obra quando ele for seguro e claramente separado.
 4. Use apenas fixtures fictícias e provedores simulados. Registre testes executados, resultados e lacunas. Não faça merge, deploy ou release.
 
-Este rascunho contém apenas o diagnóstico e os critérios de aceite. A implementação e os testes de regressão ainda estão pendentes.
+## Verificação
+
+- O teste de regressão falhou no código anterior porque a edição consultada recebeu a editora da outra edição.
+- Com a correção, os 20 testes do pacote de metadados passaram com `gradlew :core:test --tests "*core.metadata.*"`. Os casos novos usam registros fictícios e cobrem ISBNs distintos, o registro sem ISBN que corresponde a duas edições, ISBN-10/ISBN-13 equivalentes e a prioridade da edição consultada.
+- A verificação foi feita no módulo JVM, com provedores simulados. A interface Android e as respostas de provedores reais ficaram fora da validação.
