@@ -38,6 +38,7 @@ class MigrationTest {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
             )
             .build()
         runBlocking {
@@ -65,6 +66,7 @@ class MigrationTest {
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
         helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
+        helper.runMigrationsAndValidate(dbName, 7, true, AppDatabase.MIGRATION_6_7)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
@@ -74,6 +76,7 @@ class MigrationTest {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
             )
             .build()
 
@@ -187,6 +190,7 @@ class MigrationTest {
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
         helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
+        helper.runMigrationsAndValidate(dbName, 7, true, AppDatabase.MIGRATION_6_7)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
@@ -196,6 +200,7 @@ class MigrationTest {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
             )
             .build()
 
@@ -289,6 +294,7 @@ class MigrationTest {
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_3_4)
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
         helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
+        helper.runMigrationsAndValidate(dbName, 7, true, AppDatabase.MIGRATION_6_7)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
@@ -298,6 +304,7 @@ class MigrationTest {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
             )
             .build()
 
@@ -339,6 +346,7 @@ class MigrationTest {
         // Continue migration to 5 and 6 so Room database can open with current schema
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
         helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
+        helper.runMigrationsAndValidate(dbName, 7, true, AppDatabase.MIGRATION_6_7)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
@@ -348,6 +356,7 @@ class MigrationTest {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
             )
             .build()
 
@@ -487,6 +496,7 @@ class MigrationTest {
         helper.runMigrationsAndValidate(dbName, 4, true, AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
         helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
+        helper.runMigrationsAndValidate(dbName, 7, true, AppDatabase.MIGRATION_6_7)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
@@ -496,6 +506,7 @@ class MigrationTest {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
             )
             .build()
 
@@ -559,6 +570,7 @@ class MigrationTest {
         // Validate migration to version 5 against 5.json, then 6 against 6.json
         helper.runMigrationsAndValidate(dbName, 5, true, AppDatabase.MIGRATION_4_5)
         helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
+        helper.runMigrationsAndValidate(dbName, 7, true, AppDatabase.MIGRATION_6_7)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
@@ -568,6 +580,7 @@ class MigrationTest {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
             )
             .build()
 
@@ -633,13 +646,14 @@ class MigrationTest {
 
         helper.runMigrationsAndValidate(
             dbName,
-            6,
+            7,
             true,
             AppDatabase.MIGRATION_1_2,
             AppDatabase.MIGRATION_2_3,
             AppDatabase.MIGRATION_3_4,
             AppDatabase.MIGRATION_4_5,
             AppDatabase.MIGRATION_5_6,
+            AppDatabase.MIGRATION_6_7,
         )
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -650,6 +664,7 @@ class MigrationTest {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
             )
             .build()
 
@@ -706,6 +721,7 @@ class MigrationTest {
         }
 
         helper.runMigrationsAndValidate(dbName, 6, true, AppDatabase.MIGRATION_5_6)
+        helper.runMigrationsAndValidate(dbName, 7, true, AppDatabase.MIGRATION_6_7)
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
@@ -715,6 +731,7 @@ class MigrationTest {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
             )
             .build()
 
@@ -738,6 +755,126 @@ class MigrationTest {
             val found = db.series().findByNameIgnoreCase("  mistborn ")
             assertNotNull(found)
             assertEquals(newId, found?.id)
+        }
+        db.close()
+    }
+
+    @Test
+    fun migration6To7PreservesExistingDataAndAddsMetadataColumns() {
+        val dbName = "migration-test-6-7"
+        helper.createDatabase(dbName, 6).apply {
+            execSQL(
+                "INSERT INTO Series (id, name, author, styleNotes, glossaryVersion, createdAt, updatedAt) " +
+                    "VALUES (1, 'Duna', 'Frank Herbert', 'Tom solene', 3, 1000, 1000)"
+            )
+            execSQL(
+                "INSERT INTO Book (id, title, author, language, format, sha256, privatePath, sourceName, sizeBytes, importedAt, seriesId) " +
+                    "VALUES (1, 'Dune', 'Frank Herbert', 'en', 'EPUB', 'sha_dune_v6', '/data/dune.epub', 'dune.epub', 4096, 1000, 1)"
+            )
+            execSQL(
+                "INSERT INTO GlossaryEntry (id, seriesId, sourceTerm, targetTerm, notes, updatedAt) " +
+                    "VALUES (1, 1, 'Spice', 'Especiaria', 'Melange', 1000)"
+            )
+            execSQL(
+                "INSERT INTO TranslationJob (id, bookId, status, provider, modelId, blockTotal, blockDone, inputTokens, outputTokens, createdAt, updatedAt, seriesId, glossaryVersion, glossarySnapshot, styleNotesSnapshot, executionMode) " +
+                    "VALUES (1, 1, 'QUEUED', 'OPENAI', 'gpt-4o', 10, 0, 0, 0, 1000, 1000, 1, 3, '[]', 'Tom solene', 'SYNC')"
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(dbName, 7, true, AppDatabase.MIGRATION_6_7)
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
+            )
+            .build()
+
+        runBlocking {
+            // Existing records preserved untouched, new metadata columns default to null
+            val existingSeries = db.series().byId(1)
+            assertNotNull(existingSeries)
+            assertEquals("Duna", existingSeries?.name)
+            assertEquals("Frank Herbert", existingSeries?.author)
+            assertEquals("Tom solene", existingSeries?.styleNotes)
+            assertEquals(3, existingSeries?.glossaryVersion)
+            assertEquals(null, existingSeries?.summary)
+            assertEquals(null, existingSeries?.wikidataQid)
+            assertEquals(null, existingSeries?.charactersJson)
+            assertEquals(null, existingSeries?.locationsJson)
+
+            val existingBook = db.books().byId(1)
+            assertNotNull(existingBook)
+            assertEquals("Dune", existingBook?.title)
+            assertEquals(1L, existingBook?.seriesId)
+            assertEquals(null, existingBook?.isbn)
+            assertEquals(null, existingBook?.seriesPosition)
+            assertEquals(null, existingBook?.metadataSourcesJson)
+            assertEquals(null, existingBook?.charactersJson)
+            assertEquals(null, existingBook?.locationsJson)
+
+            val glossary = db.series().glossaryForSeries(1)
+            assertEquals(1, glossary.size)
+            assertEquals("Especiaria", glossary[0].targetTerm)
+
+            val job = db.translations().jobById(1)
+            assertNotNull(job)
+            assertEquals(1L, job?.seriesId)
+            assertEquals("Tom solene", job?.styleNotesSnapshot)
+
+            val sampleCharsJson = """[{"name":"Paul Atreides","description":"Protagonista","source":"WIKIDATA","fromFreeText":false}]"""
+            val sampleLocsJson = """[{"name":"Arrakis","aliases":["Duna"],"source":"WIKIDATA","fromFreeText":false}]"""
+
+            // Updating book & series metadata persists all new fields
+            db.books().updateBook(
+                existingBook!!.copy(
+                    isbn = "9780441172719",
+                    publisher = "Ace Books",
+                    publishedDate = "1965",
+                    summary = "Em Arrakis, Paul Atreides enfrenta intrigas politicas.",
+                    seriesPosition = "1",
+                    openLibraryKey = "/works/OL893415W",
+                    wikidataQid = "Q190192",
+                    hardcoverId = "42",
+                    metadataSourcesJson = """{"isbn":"OPEN_LIBRARY","seriesPosition":"WIKIDATA"}""",
+                    charactersJson = sampleCharsJson,
+                    locationsJson = sampleLocsJson,
+                )
+            )
+            db.series().updateSeries(
+                existingSeries!!.copy(
+                    summary = "Saga de ficcao cientifica ambientada no planeta deserto Arrakis.",
+                    wikidataQid = "Q837705",
+                    hardcoverId = "7",
+                    metadataSourcesJson = """{"summary":"WIKIDATA"}""",
+                    charactersJson = sampleCharsJson,
+                    locationsJson = sampleLocsJson,
+                )
+            )
+
+            val updatedBook = db.books().byId(1)
+            assertEquals("9780441172719", updatedBook?.isbn)
+            assertEquals("Ace Books", updatedBook?.publisher)
+            assertEquals("1965", updatedBook?.publishedDate)
+            assertEquals("1", updatedBook?.seriesPosition)
+            assertEquals("/works/OL893415W", updatedBook?.openLibraryKey)
+            assertEquals("Q190192", updatedBook?.wikidataQid)
+            assertEquals("42", updatedBook?.hardcoverId)
+            assertEquals(sampleCharsJson, updatedBook?.charactersJson)
+            assertEquals(sampleLocsJson, updatedBook?.locationsJson)
+
+            val updatedSeries = db.series().byId(1)
+            assertEquals("Q837705", updatedSeries?.wikidataQid)
+            assertEquals("7", updatedSeries?.hardcoverId)
+            assertEquals("""{"summary":"WIKIDATA"}""", updatedSeries?.metadataSourcesJson)
+            assertEquals(sampleCharsJson, updatedSeries?.charactersJson)
+            assertEquals(sampleLocsJson, updatedSeries?.locationsJson)
         }
         db.close()
     }

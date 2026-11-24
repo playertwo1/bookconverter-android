@@ -4,6 +4,19 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.playertwo1.bookconverter.core.metadata.AggregatedBookCandidate
+import io.github.playertwo1.bookconverter.core.metadata.AggregatedSearchResponse
+import io.github.playertwo1.bookconverter.core.metadata.BookMetadataAggregator
+import io.github.playertwo1.bookconverter.core.metadata.BookMetadataQuery
+import io.github.playertwo1.bookconverter.core.metadata.HardcoverMetadataProvider
+import androidx.room.withTransaction
+import io.github.playertwo1.bookconverter.core.metadata.MetadataField
+import io.github.playertwo1.bookconverter.core.metadata.parseMetadataSources
+import io.github.playertwo1.bookconverter.core.metadata.serializeMetadataSources
+import io.github.playertwo1.bookconverter.core.metadata.MetadataSource
+import io.github.playertwo1.bookconverter.core.metadata.OpenLibraryMetadataProvider
+import io.github.playertwo1.bookconverter.core.metadata.SourceSearchResult
+import io.github.playertwo1.bookconverter.core.metadata.WikidataMetadataProvider
 import io.github.playertwo1.bookconverter.core.provider.Provider
 import io.github.playertwo1.bookconverter.core.provider.ProviderClient
 import io.github.playertwo1.bookconverter.core.provider.providerClient
@@ -13,13 +26,20 @@ import io.github.playertwo1.bookconverter.core.translate.GlossaryTerm
 import io.github.playertwo1.bookconverter.core.translate.SeriesMemoryExtractor
 import io.github.playertwo1.bookconverter.data.AppDatabase
 import io.github.playertwo1.bookconverter.data.Book
+import io.github.playertwo1.bookconverter.data.BookDao
+import io.github.playertwo1.bookconverter.data.BookMetadataReviewSelection
 import io.github.playertwo1.bookconverter.data.GlossaryEntry
 import io.github.playertwo1.bookconverter.data.MemoryCategory
 import io.github.playertwo1.bookconverter.data.MemoryStatus
 import io.github.playertwo1.bookconverter.data.ProviderSettings
 import io.github.playertwo1.bookconverter.data.Series
+import io.github.playertwo1.bookconverter.data.SeriesDao
 import io.github.playertwo1.bookconverter.data.SeriesMemoryEntry
 import io.github.playertwo1.bookconverter.data.SeriesSummary
+import io.github.playertwo1.bookconverter.data.applyMetadataToBook
+import io.github.playertwo1.bookconverter.data.applyMetadataToSeries
+import io.github.playertwo1.bookconverter.data.buildNewGlossaryEntries
+import io.github.playertwo1.bookconverter.data.unlinkMetadata
 import io.github.playertwo1.bookconverter.data.label
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -37,11 +57,70 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
+data class BookMetadataLookupUiState(
+    val isLoading: Boolean = false,
+    val hasSearched: Boolean = false,
+    val candidates: List<AggregatedBookCandidate> = emptyList(),
+    val activeSources: List<MetadataSource> = emptyList(),
+    val warnings: List<String> = emptyList(),
+    val error: String? = null,
+)
+
+internal fun buildMetadataLookupUiState(response: AggregatedSearchResponse): BookMetadataLookupUiState {
+    val warnings = response.failedSources.map { "${it.source.displayName}: ${it.message}" }
+    val allFailed = response.activeSources.isEmpty() && response.failedSources.isNotEmpty()
+    return BookMetadataLookupUiState(
+        isLoading = false,
+        hasSearched = true,
+        candidates = response.candidates,
+        activeSources = response.activeSources,
+        warnings = warnings,
+        error = if (allFailed) warnings.joinToString(" ") else null,
+    )
+}
+
+internal suspend fun unlinkMetadataInStorage(
+    seriesDao: SeriesDao,
+    bookDao: BookDao,
+    seriesId: Long,
+    bookId: Long?,
+    now: Long = System.currentTimeMillis(),
+): Boolean {
+    if (bookId == null) {
+        val series = seriesDao.byId(seriesId) ?: return false
+        seriesDao.updateSeries(series.unlinkMetadata(now))
+    } else {
+        val book = bookDao.byId(bookId) ?: return false
+        if (book.seriesId != seriesId) return false
+        bookDao.updateBook(book.unlinkMetadata())
+    }
+    return true
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
 class SeriesViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
     private val seriesDao = db.series()
     private val bookDao = db.books()
     private val settings = ProviderSettings(app)
+    private val appVersion: String = runCatching {
+        app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()
+    }.getOrDefault("1.0")
+    private val metadataAggregator: BookMetadataAggregator by lazy {
+        BookMetadataAggregator(
+            listOf(
+                OpenLibraryMetadataProvider(appVersion = appVersion),
+                WikidataMetadataProvider(appVersion = appVersion),
+                HardcoverMetadataProvider(
+                    tokenProvider = { settings.hardcoverToken() },
+                    appVersion = appVersion,
+                ),
+            )
+        )
+    }
+    private var metadataSearchJob: Job? = null
+    private val _metadataLookupState = MutableStateFlow(BookMetadataLookupUiState())
+    val metadataLookupState: StateFlow<BookMetadataLookupUiState> = _metadataLookupState.asStateFlow()
 
     val seriesList: StateFlow<List<SeriesSummary>> = seriesDao.observeAllSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -88,29 +167,74 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
         author: String? = null,
         styleNotes: String = "",
         linkBookId: Long? = null,
+        summary: String? = null,
+        metadataSelection: BookMetadataReviewSelection? = null,
         onCreated: (Long) -> Unit = {},
     ) {
         val trimmedName = name.trim()
         if (trimmedName.isEmpty()) return
         val cleanAuthor = author?.trim()?.ifEmpty { null }
+        val cleanSummary = summary?.trim()?.ifEmpty { null }
         viewModelScope.launch {
             try {
                 val now = System.currentTimeMillis()
-                val id = seriesDao.insertSeries(
-                    Series(
+                val baseSeries = Series(
+                    name = trimmedName,
+                    author = cleanAuthor,
+                    styleNotes = styleNotes.trim(),
+                    glossaryVersion = 1,
+                    createdAt = now,
+                    updatedAt = now,
+                    summary = cleanSummary,
+                )
+                val seriesToInsert = if (metadataSelection != null) {
+                    val matchingSources = metadataSelection.sources.filterKeys { field ->
+                        val current = when (field) {
+                            MetadataField.SERIES_NAME -> trimmedName
+                            MetadataField.AUTHOR -> cleanAuthor
+                            MetadataField.SERIES_SUMMARY -> cleanSummary
+                            else -> null
+                        }
+                        current != null && current == metadataSelection.appliedValue(field)
+                    }
+                    applyMetadataToSeries(baseSeries, metadataSelection, now).copy(
                         name = trimmedName,
                         author = cleanAuthor,
-                        styleNotes = styleNotes.trim(),
-                        glossaryVersion = 1,
-                        createdAt = now,
-                        updatedAt = now,
+                        summary = cleanSummary,
+                        metadataSourcesJson = serializeMetadataSources(matchingSources),
                     )
-                )
+                } else {
+                    baseSeries
+                }
+                val id = seriesDao.insertSeries(seriesToInsert)
                 if (linkBookId != null) {
-                    bookDao.setSeries(linkBookId, id)
+                    val existingBook = bookDao.byId(linkBookId)
+                    if (existingBook != null && metadataSelection != null) {
+                        bookDao.updateBook(applyMetadataToBook(existingBook, metadataSelection, targetSeriesId = id))
+                    } else {
+                        bookDao.setSeries(linkBookId, id)
+                    }
+                }
+                var addedGlossaryCount = 0
+                if (metadataSelection != null) {
+                    val newGlossary = buildNewGlossaryEntries(
+                        seriesId = id,
+                        existingGlossary = emptyList(),
+                        charactersForGlossary = metadataSelection.charactersForGlossary,
+                        locationsForGlossary = metadataSelection.locationsForGlossary,
+                        now = now,
+                    )
+                    if (newGlossary.isNotEmpty()) {
+                        seriesDao.importGlossaryEntriesAndBump(id, newGlossary, now)
+                        addedGlossaryCount = newGlossary.size
+                    }
                 }
                 _selectedSeriesId.value = id
-                _message.value = "Série \"$trimmedName\" criada."
+                _message.value = if (addedGlossaryCount > 0) {
+                    "Série \"$trimmedName\" criada · $addedGlossaryCount termo(s) no glossário."
+                } else {
+                    "Série \"$trimmedName\" criada."
+                }
                 onCreated(id)
             } catch (e: Exception) {
                 _message.value = "Erro ao criar série: ${e.message ?: e.javaClass.simpleName}"
@@ -118,24 +242,135 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun updateSeries(seriesId: Long, name: String, author: String?, styleNotes: String) {
+    fun updateSeries(
+        seriesId: Long,
+        name: String,
+        author: String?,
+        styleNotes: String,
+        summary: String? = null,
+        keepExistingSummary: Boolean = true,
+    ) {
         viewModelScope.launch {
             try {
                 val current = seriesDao.byId(seriesId) ?: return@launch
                 val trimmedName = name.trim().ifEmpty { current.name }
                 val cleanAuthor = author?.trim()?.ifEmpty { null }
+                val finalSummary = if (keepExistingSummary) current.summary else summary?.trim()?.ifEmpty { null }
                 val now = System.currentTimeMillis()
+                val sources = parseMetadataSources(current.metadataSourcesJson).filterKeys { field ->
+                    when (field) {
+                        MetadataField.SERIES_NAME -> trimmedName == current.name
+                        MetadataField.AUTHOR -> cleanAuthor == current.author
+                        MetadataField.SERIES_SUMMARY -> finalSummary == current.summary
+                        else -> true
+                    }
+                }
                 seriesDao.updateSeries(
                     current.copy(
                         name = trimmedName,
                         author = cleanAuthor,
                         styleNotes = styleNotes.trim(),
+                        summary = finalSummary,
+                        metadataSourcesJson = serializeMetadataSources(sources),
                         updatedAt = now,
                     )
                 )
                 _message.value = "Alterações salvas."
             } catch (e: Exception) {
                 _message.value = "Erro ao salvar alterações: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun searchBookMetadata(isbn: String, title: String, author: String) {
+        val query = BookMetadataQuery(isbn = isbn, title = title, author = author)
+        if (query.isBlank) {
+            _metadataLookupState.value = BookMetadataLookupUiState(
+                error = "Informe ISBN, título ou autor para buscar.",
+            )
+            return
+        }
+        metadataSearchJob?.cancel()
+        _metadataLookupState.value = BookMetadataLookupUiState(isLoading = true)
+        metadataSearchJob = viewModelScope.launch {
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    metadataAggregator.search(query)
+                }
+                _metadataLookupState.value = buildMetadataLookupUiState(response)
+            } catch (_: CancellationException) {
+                _metadataLookupState.value = _metadataLookupState.value.copy(isLoading = false)
+            } catch (e: Exception) {
+                _metadataLookupState.value = BookMetadataLookupUiState(
+                    isLoading = false,
+                    hasSearched = true,
+                    error = "Falha na busca: ${e.message ?: e.javaClass.simpleName}",
+                )
+            }
+        }
+    }
+
+    fun cancelBookMetadataSearch() {
+        metadataSearchJob?.cancel()
+        _metadataLookupState.value = _metadataLookupState.value.copy(isLoading = false)
+    }
+
+    fun clearBookMetadataSearch() {
+        metadataSearchJob?.cancel()
+        _metadataLookupState.value = BookMetadataLookupUiState()
+    }
+
+    fun applyBookAndSeriesMetadata(
+        seriesId: Long,
+        bookId: Long?,
+        selection: BookMetadataReviewSelection,
+    ) {
+        viewModelScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                var addedGlossaryCount = 0
+                db.withTransaction {
+                    val currentSeries = seriesDao.byId(seriesId)
+                        ?: return@withTransaction
+                    seriesDao.updateSeries(applyMetadataToSeries(currentSeries, selection, now))
+                    if (bookId != null) {
+                        val currentBook = bookDao.byId(bookId)
+                        if (currentBook != null) {
+                            bookDao.updateBook(applyMetadataToBook(currentBook, selection, targetSeriesId = seriesId))
+                        }
+                    }
+                    val existingGlossary = seriesDao.glossaryForSeries(seriesId)
+                    val newGlossary = buildNewGlossaryEntries(
+                        seriesId = seriesId,
+                        existingGlossary = existingGlossary,
+                        charactersForGlossary = selection.charactersForGlossary,
+                        locationsForGlossary = selection.locationsForGlossary,
+                        now = now,
+                    )
+                    if (newGlossary.isNotEmpty()) {
+                        seriesDao.importGlossaryEntriesAndBump(seriesId, newGlossary, now)
+                        addedGlossaryCount = newGlossary.size
+                    }
+                }
+                _message.value = if (addedGlossaryCount > 0) {
+                    "Informações salvas · $addedGlossaryCount termo(s) no glossário."
+                } else {
+                    "Informações salvas."
+                }
+            } catch (e: Exception) {
+                _message.value = "Erro ao salvar informações: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun unlinkMetadata(seriesId: Long, bookId: Long?) {
+        viewModelScope.launch {
+            try {
+                if (unlinkMetadataInStorage(seriesDao, bookDao, seriesId, bookId)) {
+                    _message.value = "Informações desvinculadas."
+                }
+            } catch (e: Exception) {
+                _message.value = "Erro ao desvincular informações: ${e.message ?: e.javaClass.simpleName}"
             }
         }
     }

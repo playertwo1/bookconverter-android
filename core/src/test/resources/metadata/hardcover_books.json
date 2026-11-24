@@ -1,0 +1,43 @@
+{
+  "data": {
+    "books": [
+      {
+        "id": 1002,
+        "title": "Dune Messiah",
+        "description": "Twelve years after his victory, Paul Atreides faces political conspiracies across the imperium.",
+        "release_date": "1969-10-15",
+        "release_year": 1969,
+        "contributions": [
+          { "author": { "name": "Frank Herbert" } }
+        ],
+        "book_series": [
+          {
+            "position": 2,
+            "series": {
+              "id": 55,
+              "name": "Dune Chronicles",
+              "description": "Epic science fiction saga spanning thousands of years on Arrakis."
+            }
+          }
+        ],
+        "book_characters": [
+          {
+            "character": {
+              "name": "Alia Atreides",
+              "biography": "Sister of Paul Atreides."
+            }
+          }
+        ],
+        "editions": [
+          {
+            "isbn_13": "9780441172696",
+            "isbn_10": "0441172695",
+            "release_date": "1987-07-15",
+            "publisher": { "name": "Ace Books" },
+            "language": { "language": "English" }
+          }
+        ]
+      }
+    ]
+  }
+}

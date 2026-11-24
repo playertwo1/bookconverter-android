@@ -38,6 +38,17 @@ class ProviderSettings(context: Context) {
         else prefs.edit().putString("key.$p", encrypt(k)).remove("ok.$p").apply()
     }
 
+    /** Optional personal Hardcover GraphQL API token, AES-GCM encrypted in Android Keystore. */
+    fun hasHardcoverToken(): Boolean = prefs.contains(HARDCOVER_TOKEN)
+
+    fun hardcoverToken(): String? = decrypt(HARDCOVER_TOKEN)
+
+    fun setHardcoverToken(token: String?) {
+        val clean = token?.trim().orEmpty()
+        if (clean.isEmpty()) prefs.edit().remove(HARDCOVER_TOKEN).apply()
+        else prefs.edit().putString(HARDCOVER_TOKEN, encrypt(clean)).apply()
+    }
+
     fun chatGptTokens(): ChatGptTokens? = decrypt(OAUTH)?.let { runCatching { ChatGptTokens.fromJson(it) }.getOrNull() }
 
     fun setChatGptTokens(t: ChatGptTokens?) {
@@ -147,6 +158,7 @@ class ProviderSettings(context: Context) {
         const val ALIAS = "provider-api-keys"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val OAUTH = "oauth.CHATGPT"
+        const val HARDCOVER_TOKEN = "token.HARDCOVER"
         /** One refresh at a time: the refresh token rotates, a parallel refresh would burn it. */
         val REFRESH_LOCK = Any()
     }

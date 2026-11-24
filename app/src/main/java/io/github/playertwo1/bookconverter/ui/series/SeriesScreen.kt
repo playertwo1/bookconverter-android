@@ -61,13 +61,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.playertwo1.bookconverter.core.metadata.MetadataField
+import io.github.playertwo1.bookconverter.core.metadata.MetadataNamedItem
+import io.github.playertwo1.bookconverter.core.metadata.parseNamedItems
 import io.github.playertwo1.bookconverter.data.Book
+import io.github.playertwo1.bookconverter.data.BookMetadataReviewSelection
 import io.github.playertwo1.bookconverter.data.GlossaryEntry
 import io.github.playertwo1.bookconverter.data.MemoryCategory
 import io.github.playertwo1.bookconverter.data.MemoryStatus
 import io.github.playertwo1.bookconverter.data.Series
 import io.github.playertwo1.bookconverter.data.SeriesMemoryEntry
 import io.github.playertwo1.bookconverter.data.SeriesSummary
+import io.github.playertwo1.bookconverter.data.formatNamedItemOrigin
+import io.github.playertwo1.bookconverter.data.formatSourceAttribution
+import io.github.playertwo1.bookconverter.data.hasLinkedMetadata
 import io.github.playertwo1.bookconverter.data.suggestSeriesName
 import io.github.playertwo1.bookconverter.ui.sizeLabel
 import io.github.playertwo1.bookconverter.ui.theme.Accent
@@ -96,6 +103,7 @@ fun SeriesScreen(
     val seriesList by vm.seriesList.collectAsStateWithLifecycle()
     val allBooks by vm.allBooks.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
+    val metadataLookupState by vm.metadataLookupState.collectAsStateWithLifecycle()
 
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var pendingBookForSeries by remember { mutableStateOf<Book?>(null) }
@@ -111,9 +119,12 @@ fun SeriesScreen(
             extractionProgress = extractionProgress,
             allBooks = allBooks,
             message = message,
+            metadataLookupState = metadataLookupState,
             onDismissMessage = { vm.clearMessage() },
             onBack = { vm.selectSeries(null) },
-            onUpdateSeries = { id, name, author, notes -> vm.updateSeries(id, name, author, notes) },
+            onUpdateSeries = { id, name, author, notes, summary, keepSummary ->
+                vm.updateSeries(id, name, author, notes, summary, keepSummary)
+            },
             onDeleteSeries = { id -> vm.deleteSeries(id) },
             onToggleBook = { book -> vm.toggleBookSeries(book, selectedSeries!!.id) },
             onSaveTerm = { entryId, src, tgt, notes ->
@@ -128,6 +139,13 @@ fun SeriesScreen(
             onRejectProposal = { entryId -> vm.rejectProposal(entryId) },
             onDeleteMemoryEntry = { entryId -> vm.deleteMemoryEntry(entryId) },
             onUpdateMemoryEntry = { entryId, newTarget -> vm.updateMemoryEntry(entryId, newTarget) },
+            onSearchBookMetadata = vm::searchBookMetadata,
+            onCancelBookMetadataSearch = vm::cancelBookMetadataSearch,
+            onClearBookMetadataSearch = vm::clearBookMetadataSearch,
+            onUnlinkMetadata = { bookId -> vm.unlinkMetadata(selectedSeries!!.id, bookId) },
+            onApplyBookAndSeriesMetadata = { bookId, selection ->
+                vm.applyBookAndSeriesMetadata(selectedSeries!!.id, bookId, selection)
+            },
             modifier = modifier,
         )
     } else {
@@ -154,14 +172,29 @@ fun SeriesScreen(
         CreateSeriesDialog(
             initialName = targetBook?.let { suggestSeriesName(it.title) }.orEmpty(),
             initialAuthor = targetBook?.author.orEmpty(),
-            onConfirm = { name, author, notes ->
+            allBooks = allBooks,
+            initialBook = targetBook,
+            lookupState = metadataLookupState,
+            onSearchBookMetadata = vm::searchBookMetadata,
+            onCancelBookMetadataSearch = vm::cancelBookMetadataSearch,
+            onClearBookMetadataSearch = vm::clearBookMetadataSearch,
+            onConfirm = { name, author, notes, summary, bookId, selection ->
                 showCreateDialog = false
                 pendingBookForSeries = null
-                vm.createSeries(name, author, notes, linkBookId = targetBook?.id)
+                vm.clearBookMetadataSearch()
+                vm.createSeries(
+                    name = name,
+                    author = author,
+                    styleNotes = notes,
+                    linkBookId = bookId ?: targetBook?.id,
+                    summary = summary,
+                    metadataSelection = selection,
+                )
             },
             onDismiss = {
                 showCreateDialog = false
                 pendingBookForSeries = null
+                vm.clearBookMetadataSearch()
             },
         )
     }
@@ -432,9 +465,10 @@ private fun SeriesDetailScreen(
     extractionProgress: String?,
     allBooks: List<Book>,
     message: String?,
+    metadataLookupState: BookMetadataLookupUiState,
     onDismissMessage: () -> Unit,
     onBack: () -> Unit,
-    onUpdateSeries: (Long, String, String?, String) -> Unit,
+    onUpdateSeries: (Long, String, String?, String, String?, Boolean) -> Unit,
     onDeleteSeries: (Long) -> Unit,
     onToggleBook: (Book) -> Unit,
     onSaveTerm: (Long, String, String, String?) -> Unit,
@@ -447,10 +481,19 @@ private fun SeriesDetailScreen(
     onRejectProposal: (Long) -> Unit,
     onDeleteMemoryEntry: (Long) -> Unit,
     onUpdateMemoryEntry: (Long, String) -> Unit,
+    onSearchBookMetadata: (String, String, String) -> Unit,
+    onCancelBookMetadataSearch: () -> Unit,
+    onClearBookMetadataSearch: () -> Unit,
+    onUnlinkMetadata: (Long?) -> Unit,
+    onApplyBookAndSeriesMetadata: (Long?, BookMetadataReviewSelection) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var unlinkBookId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showUnlinkMetadata by rememberSaveable { mutableStateOf(false) }
     var showRenameDialog by rememberSaveable { mutableStateOf(false) }
     var showLinkBooksDialog by rememberSaveable { mutableStateOf(false) }
+    var showMetadataLookup by rememberSaveable { mutableStateOf(false) }
+    var lookupInitialBookId by rememberSaveable { mutableStateOf<Long?>(null) }
     var termToEdit by remember { mutableStateOf<GlossaryEntry?>(null) }
     var showAddTermDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteSeriesDialog by rememberSaveable { mutableStateOf(false) }
@@ -463,8 +506,15 @@ private fun SeriesDetailScreen(
     val isNotesModified = notesText != series.styleNotes
 
     val linkedBooks = remember(allBooks, series.id) {
-        allBooks.filter { it.seriesId == series.id }
+        allBooks
+            .filter { it.seriesId == series.id }
+            .sortedWith(
+                compareBy<Book> { it.seriesPosition?.toDoubleOrNull() ?: Double.MAX_VALUE }
+                    .thenBy { it.title.lowercase() }
+            )
     }
+    val seriesCharacters = remember(series.charactersJson) { parseNamedItems(series.charactersJson) }
+    val seriesLocations = remember(series.locationsJson) { parseNamedItems(series.locationsJson) }
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -543,6 +593,63 @@ private fun SeriesDetailScreen(
             }
         }
 
+        // Resumo breve, personagens, locais e atribuição da série (quando salvos)
+        val seriesAttribution = formatSourceAttribution(
+            metadataSourcesJson = series.metadataSourcesJson,
+            charactersJson = series.charactersJson,
+            locationsJson = series.locationsJson,
+        )
+        if (!series.summary.isNullOrBlank() || seriesCharacters.isNotEmpty() || seriesLocations.isNotEmpty() || seriesAttribution != null) {
+            item {
+                M3Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    color = Surface,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Stroke),
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Sobre a série",
+                            fontFamily = Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = TextPrimary,
+                        )
+                        if (!series.summary.isNullOrBlank()) {
+                            Text(
+                                text = series.summary,
+                                color = TextSecondary,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                        if (seriesCharacters.isNotEmpty()) {
+                            SavedNamedItemsBlock(
+                                title = "Personagens (${seriesCharacters.size})",
+                                items = seriesCharacters,
+                            )
+                        }
+                        if (seriesLocations.isNotEmpty()) {
+                            SavedNamedItemsBlock(
+                                title = "Locais (${seriesLocations.size})",
+                                items = seriesLocations,
+                            )
+                        }
+                        if (seriesAttribution != null) {
+                            Text(
+                                text = seriesAttribution,
+                                color = TextTertiary,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Section: Notas de Estilo
         item {
             M3Surface(
@@ -581,7 +688,7 @@ private fun SeriesDetailScreen(
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         Button(
-                            onClick = { onUpdateSeries(series.id, series.name, series.author, notesText) },
+                            onClick = { onUpdateSeries(series.id, series.name, series.author, notesText, null, true) },
                             enabled = isNotesModified,
                             colors = ButtonDefaults.buttonColors(containerColor = Accent),
                             shape = RoundedCornerShape(12.dp),
@@ -634,6 +741,34 @@ private fun SeriesDetailScreen(
                             Text("+ Vincular", fontSize = 13.sp)
                         }
                     }
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = {
+                            onClearBookMetadataSearch()
+                            lookupInitialBookId = linkedBooks.firstOrNull()?.id
+                            showMetadataLookup = true
+                        },
+                        border = BorderStroke(1.dp, Accent),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp),
+                    ) {
+                        Text(
+                            if (series.hasLinkedMetadata()) "Corrigir informações do livro" else "Buscar informações do livro",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    if (series.hasLinkedMetadata()) {
+                        TextButton(
+                            onClick = { unlinkBookId = null; showUnlinkMetadata = true },
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                        ) {
+                            Text("Desvincular informações da série")
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
                     if (linkedBooks.isEmpty()) {
                         Text(
@@ -644,34 +779,102 @@ private fun SeriesDetailScreen(
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             linkedBooks.forEach { book ->
-                                Row(
+                                val bookCharacters = parseNamedItems(book.charactersJson)
+                                val bookLocations = parseNamedItems(book.locationsJson)
+                                val bookAttr = formatSourceAttribution(
+                                    metadataSourcesJson = book.metadataSourcesJson,
+                                    charactersJson = book.charactersJson,
+                                    locationsJson = book.locationsJson,
+                                )
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(Field)
                                         .border(1.dp, Stroke, RoundedCornerShape(12.dp))
                                         .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            text = book.title,
-                                            color = TextPrimary,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        val details = listOfNotNull(book.author, book.format, sizeLabel(book.sizeBytes))
-                                            .joinToString(" · ")
-                                        Text(details, color = TextSecondary, fontSize = 12.sp)
-                                    }
-                                    TextButton(
-                                        onClick = { onToggleBook(book) },
-                                        colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
-                                        modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Text("Desvincular", fontSize = 12.sp)
+                                        Column(Modifier.weight(1f)) {
+                                            val displayTitle = if (!book.seriesPosition.isNullOrBlank()) {
+                                                "Livro ${book.seriesPosition} · ${book.title}"
+                                            } else {
+                                                book.title
+                                            }
+                                            Text(
+                                                text = displayTitle,
+                                                color = TextPrimary,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            val details = listOfNotNull(
+                                                book.author,
+                                                book.publishedDate,
+                                                book.publisher,
+                                                book.isbn?.let { "ISBN $it" },
+                                                book.format,
+                                                sizeLabel(book.sizeBytes),
+                                            ).joinToString(" · ")
+                                            Text(details, color = TextSecondary, fontSize = 12.sp)
+                                        }
+                                        TextButton(
+                                            onClick = { onToggleBook(book) },
+                                            colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
+                                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                        ) {
+                                            Text("Desvincular", fontSize = 12.sp)
+                                        }
+                                    }
+                                    if (book.hasLinkedMetadata()) {
+                                        TextButton(
+                                            onClick = { unlinkBookId = book.id; showUnlinkMetadata = true },
+                                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                        ) {
+                                            Text("Desvincular informações")
+                                        }
+                                    }
+                                    if (!book.summary.isNullOrBlank()) {
+                                        Text(
+                                            text = book.summary,
+                                            color = TextSecondary,
+                                            fontSize = 12.sp,
+                                            maxLines = 3,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(top = 6.dp),
+                                        )
+                                    }
+                                    if (bookCharacters.isNotEmpty()) {
+                                        Text(
+                                            text = "Personagens: ${bookCharacters.joinToString(", ") { it.name }}",
+                                            color = TextSecondary,
+                                            fontSize = 11.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(top = 4.dp),
+                                        )
+                                    }
+                                    if (bookLocations.isNotEmpty()) {
+                                        Text(
+                                            text = "Locais: ${bookLocations.joinToString(", ") { it.name }}",
+                                            color = TextSecondary,
+                                            fontSize = 11.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(top = 2.dp),
+                                        )
+                                    }
+                                    if (bookAttr != null) {
+                                        Text(
+                                            text = bookAttr,
+                                            color = TextTertiary,
+                                            fontSize = 11.sp,
+                                            modifier = Modifier.padding(top = 4.dp),
+                                        )
                                     }
                                 }
                             }
@@ -1283,15 +1486,65 @@ private fun SeriesDetailScreen(
         }
     }
 
+    if (showUnlinkMetadata) {
+        AlertDialog(
+            onDismissRequest = { showUnlinkMetadata = false },
+            title = { Text("Desvincular informações") },
+            text = {
+                val target = if (unlinkBookId == null) "da série" else "do livro"
+                Text("Remover os dados da busca $target? O título do livro e o nome da série permanecem, assim como dados manuais e termos do glossário.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showUnlinkMetadata = false
+                    onUnlinkMetadata(unlinkBookId)
+                }) { Text("Desvincular informações") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUnlinkMetadata = false }) { Text("Cancelar") }
+            },
+        )
+    }
+
     if (showRenameDialog) {
         EditSeriesDialog(
             currentName = series.name,
             currentAuthor = series.author.orEmpty(),
-            onConfirm = { newName, newAuthor ->
+            currentSummary = series.summary.orEmpty(),
+            onOpenLookup = {
                 showRenameDialog = false
-                onUpdateSeries(series.id, newName, newAuthor, series.styleNotes)
+                onClearBookMetadataSearch()
+                lookupInitialBookId = linkedBooks.firstOrNull()?.id
+                showMetadataLookup = true
+            },
+            onConfirm = { newName, newAuthor, newSummary ->
+                showRenameDialog = false
+                onUpdateSeries(series.id, newName, newAuthor, series.styleNotes, newSummary, false)
             },
             onDismiss = { showRenameDialog = false },
+        )
+    }
+
+    if (showMetadataLookup) {
+        val initialBook = remember(allBooks, lookupInitialBookId, linkedBooks) {
+            allBooks.firstOrNull { it.id == lookupInitialBookId } ?: linkedBooks.firstOrNull()
+        }
+        BookMetadataLookupDialog(
+            books = allBooks,
+            initialBook = initialBook,
+            existingSeries = series,
+            lookupState = metadataLookupState,
+            onSearch = onSearchBookMetadata,
+            onCancelSearch = onCancelBookMetadataSearch,
+            onConfirm = { targetBook, selection ->
+                showMetadataLookup = false
+                onClearBookMetadataSearch()
+                onApplyBookAndSeriesMetadata(targetBook?.id, selection)
+            },
+            onDismiss = {
+                showMetadataLookup = false
+                onClearBookMetadataSearch()
+            },
         )
     }
 
@@ -1412,13 +1665,30 @@ private fun MessageBanner(
 private fun CreateSeriesDialog(
     initialName: String = "",
     initialAuthor: String = "",
-    onConfirm: (name: String, author: String?, styleNotes: String) -> Unit,
+    allBooks: List<Book> = emptyList(),
+    initialBook: Book? = null,
+    lookupState: BookMetadataLookupUiState = BookMetadataLookupUiState(),
+    onSearchBookMetadata: (String, String, String) -> Unit = { _, _, _ -> },
+    onCancelBookMetadataSearch: () -> Unit = {},
+    onClearBookMetadataSearch: () -> Unit = {},
+    onConfirm: (
+        name: String,
+        author: String?,
+        styleNotes: String,
+        summary: String?,
+        targetBookId: Long?,
+        metadataSelection: BookMetadataReviewSelection?,
+    ) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
     var author by rememberSaveable(initialAuthor) { mutableStateOf(initialAuthor) }
     var styleNotes by rememberSaveable { mutableStateOf("") }
+    var summary by rememberSaveable { mutableStateOf("") }
     var showError by rememberSaveable { mutableStateOf(false) }
+    var showLookup by rememberSaveable { mutableStateOf(false) }
+    var pendingTargetBookId by rememberSaveable(initialBook?.id) { mutableStateOf(initialBook?.id) }
+    var pendingSelection by remember { mutableStateOf<BookMetadataReviewSelection?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1433,6 +1703,43 @@ private fun CreateSeriesDialog(
         },
         text = {
             Column(Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = {
+                        onClearBookMetadataSearch()
+                        showLookup = true
+                    },
+                    border = BorderStroke(1.dp, Accent),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp),
+                ) {
+                    Text("Buscar informações do livro", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                if (pendingSelection != null) {
+                    val sel = pendingSelection!!
+                    val sourcesLine = sel.allContributingSources.joinToString(", ") { it.displayName }
+                    val extras = listOfNotNull(
+                        sel.characters.size.takeIf { it > 0 }?.let { "$it pers." },
+                        sel.locations.size.takeIf { it > 0 }?.let { "$it locais" },
+                    ).joinToString(", ")
+                    val suffix = listOfNotNull(
+                        sourcesLine.takeIf { it.isNotEmpty() },
+                        extras.takeIf { it.isNotEmpty() },
+                    ).joinToString(" · ")
+                    Text(
+                        text = if (suffix.isNotEmpty()) {
+                            "Dados prontos para aplicar ao criar ($suffix)."
+                        } else {
+                            "Dados prontos para aplicar ao criar."
+                        },
+                        color = Positive,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = name,
                     onValueChange = {
@@ -1453,6 +1760,17 @@ private fun CreateSeriesDialog(
                     label = { Text("Autor (opcional)") },
                     placeholder = { Text("Ex: J.R.R. Tolkien") },
                     singleLine = true,
+                    colors = seriesFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = summary,
+                    onValueChange = { summary = it },
+                    label = { Text("Resumo breve da série (opcional)") },
+                    placeholder = { Text("Resumo curto sobre a saga...") },
+                    minLines = 2,
+                    maxLines = 4,
                     colors = seriesFieldColors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -1481,7 +1799,14 @@ private fun CreateSeriesDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
-                        onConfirm(name.trim(), author.trim().ifEmpty { null }, styleNotes.trim())
+                        onConfirm(
+                            name.trim(),
+                            author.trim().ifEmpty { null },
+                            styleNotes.trim(),
+                            summary.trim().ifEmpty { null },
+                            pendingTargetBookId,
+                            pendingSelection,
+                        )
                     } else {
                         showError = true
                     }
@@ -1503,17 +1828,51 @@ private fun CreateSeriesDialog(
             }
         },
     )
+
+    if (showLookup) {
+        val currentBook = remember(allBooks, pendingTargetBookId, initialBook) {
+            allBooks.firstOrNull { it.id == pendingTargetBookId } ?: initialBook
+        }
+        BookMetadataLookupDialog(
+            books = allBooks,
+            initialBook = currentBook,
+            existingSeries = null,
+            currentSeriesName = name,
+            currentSeriesAuthor = author,
+            currentSeriesSummary = summary,
+            lookupState = lookupState,
+            onSearch = onSearchBookMetadata,
+            onCancelSearch = onCancelBookMetadataSearch,
+            onConfirm = { chosenBook, selection ->
+                showLookup = false
+                onClearBookMetadataSearch()
+                pendingTargetBookId = chosenBook?.id
+                pendingSelection = selection
+                selection.appliedValue(MetadataField.SERIES_NAME)?.let { name = it }
+                selection.appliedValue(MetadataField.AUTHOR)?.let { author = it }
+                selection.appliedValue(MetadataField.SERIES_SUMMARY)?.let { summary = it }
+                showError = false
+            },
+            onDismiss = {
+                showLookup = false
+                onClearBookMetadataSearch()
+            },
+        )
+    }
 }
 
 @Composable
 private fun EditSeriesDialog(
     currentName: String,
     currentAuthor: String,
-    onConfirm: (newName: String, newAuthor: String?) -> Unit,
+    currentSummary: String,
+    onOpenLookup: () -> Unit,
+    onConfirm: (newName: String, newAuthor: String?, newSummary: String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by rememberSaveable(currentName) { mutableStateOf(currentName) }
     var author by rememberSaveable(currentAuthor) { mutableStateOf(currentAuthor) }
+    var summary by rememberSaveable(currentSummary) { mutableStateOf(currentSummary) }
     var showError by rememberSaveable { mutableStateOf(false) }
 
     AlertDialog(
@@ -1529,6 +1888,18 @@ private fun EditSeriesDialog(
         },
         text = {
             Column(Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = onOpenLookup,
+                    border = BorderStroke(1.dp, Accent),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp),
+                ) {
+                    Text("Buscar informações do livro", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = name,
                     onValueChange = {
@@ -1551,6 +1922,16 @@ private fun EditSeriesDialog(
                     colors = seriesFieldColors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = summary,
+                    onValueChange = { summary = it },
+                    label = { Text("Resumo breve da série (opcional)") },
+                    minLines = 2,
+                    maxLines = 4,
+                    colors = seriesFieldColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 if (showError) {
                     Text(
                         text = "O nome da série não pode ser vazio.",
@@ -1565,7 +1946,11 @@ private fun EditSeriesDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
-                        onConfirm(name.trim(), author.trim().ifEmpty { null })
+                        onConfirm(
+                            name.trim(),
+                            author.trim().ifEmpty { null },
+                            summary.trim().ifEmpty { null },
+                        )
                     } else {
                         showError = true
                     }
@@ -2104,6 +2489,58 @@ private fun seriesFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedContainerColor = Field,
     cursorColor = Accent,
 )
+
+@Composable
+private fun SavedNamedItemsBlock(
+    title: String,
+    items: List<MetadataNamedItem>,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = title,
+            color = TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        items.forEach { item ->
+            val origin = formatNamedItemOrigin(item)
+            val aliasPart = item.aliases.takeIf { it.isNotEmpty() }?.joinToString(", ")
+            val detail = listOfNotNull(
+                aliasPart?.let { "também: $it" },
+                item.description?.takeIf { it.isNotBlank() },
+            ).joinToString(" · ")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Field)
+                    .border(1.dp, Stroke, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = "${item.name} ($origin)",
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                if (detail.isNotEmpty()) {
+                    Text(
+                        text = detail,
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
 
 private fun sanitizeFileName(name: String): String {
     val clean = name.replace(Regex("[^a-zA-Z0-9._-]"), "_").trim('_')

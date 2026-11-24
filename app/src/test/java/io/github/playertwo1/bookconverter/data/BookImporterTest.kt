@@ -35,6 +35,9 @@ class BookImporterTest {
         override suspend fun byId(id: Long) = rows.firstOrNull { it.id == id }
         override suspend fun bySha(sha256: String) = rows.firstOrNull { it.sha256 == sha256 }
         override suspend fun insert(book: Book): Long { rows += book.copy(id = rows.size + 1L); return rows.size.toLong() }
+        override suspend fun updateBook(book: Book) {
+            rows.indexOfFirst { it.id == book.id }.takeIf { it >= 0 }?.let { rows[it] = book }
+        }
         override suspend fun setSeries(bookId: Long, seriesId: Long?) {
             rows.indexOfFirst { it.id == bookId }.takeIf { it >= 0 }?.let {
                 rows[it] = rows[it].copy(seriesId = seriesId)
