@@ -10,6 +10,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Update
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
@@ -27,6 +28,15 @@ data class Book(
     val sizeBytes: Long,
     val importedAt: Long,
     val seriesId: Long? = null,
+    val isbn: String? = null,
+    val publisher: String? = null,
+    val publishedDate: String? = null,
+    val summary: String? = null,
+    val seriesPosition: String? = null,
+    val openLibraryKey: String? = null,
+    val wikidataQid: String? = null,
+    val hardcoverId: String? = null,
+    val metadataSourcesJson: String? = null,
 )
 
 @Dao
@@ -42,6 +52,9 @@ interface BookDao {
 
     @Insert
     suspend fun insert(book: Book): Long
+
+    @Update
+    suspend fun updateBook(book: Book)
 
     @Query("UPDATE Book SET seriesId = :seriesId WHERE id = :bookId")
     suspend fun setSeries(bookId: Long, seriesId: Long?)
@@ -66,7 +79,7 @@ interface BookDao {
         GlossaryEntry::class,
         SeriesMemoryEntry::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -209,12 +222,39 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `isbn` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `publisher` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `publishedDate` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `summary` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `seriesPosition` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `openLibraryKey` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `wikidataQid` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `hardcoverId` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `metadataSourcesJson` TEXT DEFAULT NULL")
+
+                db.execSQL("ALTER TABLE `Series` ADD COLUMN `summary` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Series` ADD COLUMN `openLibraryKey` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Series` ADD COLUMN `wikidataQid` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Series` ADD COLUMN `hardcoverId` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Series` ADD COLUMN `metadataSourcesJson` TEXT DEFAULT NULL")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(
+                    MIGRATION_1_2,
+                    MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                    MIGRATION_6_7,
+                )
                 .build()
                 .also { instance = it }
         }
