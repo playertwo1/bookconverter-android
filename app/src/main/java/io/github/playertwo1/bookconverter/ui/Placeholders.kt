@@ -70,6 +70,7 @@ import io.github.playertwo1.bookconverter.core.update.GitHubUpdateChecker
 import io.github.playertwo1.bookconverter.core.update.UpdateCheckResult
 import io.github.playertwo1.bookconverter.data.BackupManager
 import io.github.playertwo1.bookconverter.data.GoogleDriveSettings
+import io.github.playertwo1.bookconverter.data.ProviderSettings
 import io.github.playertwo1.bookconverter.ui.theme.Accent
 import io.github.playertwo1.bookconverter.ui.theme.AccentSoft
 import io.github.playertwo1.bookconverter.ui.theme.AppThemeMode
@@ -102,6 +103,10 @@ fun SettingsScreen(onOpenProviders: () -> Unit) {
     var pendingRestoreUriString by rememberSaveable { mutableStateOf<String?>(null) }
 
     val driveSettings = remember { GoogleDriveSettings(context) }
+    val providerSettings = remember { ProviderSettings(context) }
+    var hasHardcoverToken by rememberSaveable { mutableStateOf(providerSettings.hasHardcoverToken()) }
+    var hardcoverTokenInput by rememberSaveable { mutableStateOf("") }
+    var hardcoverStatusMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var isDriveConnected by rememberSaveable { mutableStateOf(driveSettings.isConnected) }
     var driveEmail by rememberSaveable { mutableStateOf(driveSettings.tokens?.email ?: "Conectado") }
     var driveFolderName by rememberSaveable { mutableStateOf(driveSettings.selectedFolderName) }
@@ -205,6 +210,106 @@ fun SettingsScreen(onOpenProviders: () -> Unit) {
                 Text("Chaves, URL base e conexão", color = TextSecondary, fontSize = 13.sp)
             }
             Text("›", color = TextSecondary, fontSize = 17.sp)
+        }
+
+        // Card Fontes de livros (Hardcover)
+        Column(
+            Modifier
+                .padding(top = 16.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Surface)
+                .border(1.dp, Stroke, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+        ) {
+            Text(
+                "Fontes de livros (Hardcover)",
+                color = TextPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "Open Library e Wikidata funcionam sem chave. Cole seu token da Hardcover (opcional) para incluir essa fonte na busca de livros.",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+            )
+            Text(
+                text = if (hasHardcoverToken) "Status: token salvo com proteção no aparelho." else "Status: sem token configurado (Hardcover pulada na busca).",
+                color = if (hasHardcoverToken) Positive else TextTertiary,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
+            OutlinedTextField(
+                value = hardcoverTokenInput,
+                onValueChange = {
+                    hardcoverTokenInput = it
+                    hardcoverStatusMessage = null
+                },
+                label = { Text("Token da API Hardcover (opcional)") },
+                placeholder = { Text("Cole o token de hardcover.app/account/api") },
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                singleLine = true,
+                colors = fieldColors(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = {
+                        val trimmed = hardcoverTokenInput.trim()
+                        if (trimmed.isNotEmpty()) {
+                            providerSettings.setHardcoverToken(trimmed)
+                            hasHardcoverToken = true
+                            hardcoverTokenInput = ""
+                            hardcoverStatusMessage = "Token da Hardcover salvo."
+                        }
+                    },
+                    enabled = hardcoverTokenInput.isNotBlank(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .defaultMinSize(minHeight = 48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Accent,
+                        contentColor = TextPrimary,
+                        disabledContainerColor = Field,
+                        disabledContentColor = TextTertiary,
+                    ),
+                ) {
+                    Text("Salvar token", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                if (hasHardcoverToken) {
+                    Button(
+                        onClick = {
+                            providerSettings.setHardcoverToken(null)
+                            hasHardcoverToken = false
+                            hardcoverTokenInput = ""
+                            hardcoverStatusMessage = "Token da Hardcover removido."
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .defaultMinSize(minHeight = 48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Field,
+                            contentColor = Danger,
+                        ),
+                    ) {
+                        Text("Remover", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+            hardcoverStatusMessage?.let { msg ->
+                Spacer(Modifier.height(10.dp))
+                Text(msg, color = Positive, fontSize = 12.sp)
+            }
         }
 
         // Card Aparência (D5)

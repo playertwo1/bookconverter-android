@@ -4,6 +4,15 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.playertwo1.bookconverter.core.metadata.AggregatedBookCandidate
+import io.github.playertwo1.bookconverter.core.metadata.AggregatedSearchResponse
+import io.github.playertwo1.bookconverter.core.metadata.BookMetadataAggregator
+import io.github.playertwo1.bookconverter.core.metadata.BookMetadataQuery
+import io.github.playertwo1.bookconverter.core.metadata.HardcoverMetadataProvider
+import io.github.playertwo1.bookconverter.core.metadata.MetadataSource
+import io.github.playertwo1.bookconverter.core.metadata.OpenLibraryMetadataProvider
+import io.github.playertwo1.bookconverter.core.metadata.SourceSearchResult
+import io.github.playertwo1.bookconverter.core.metadata.WikidataMetadataProvider
 import io.github.playertwo1.bookconverter.core.provider.Provider
 import io.github.playertwo1.bookconverter.core.provider.ProviderClient
 import io.github.playertwo1.bookconverter.core.provider.providerClient
@@ -13,6 +22,7 @@ import io.github.playertwo1.bookconverter.core.translate.GlossaryTerm
 import io.github.playertwo1.bookconverter.core.translate.SeriesMemoryExtractor
 import io.github.playertwo1.bookconverter.data.AppDatabase
 import io.github.playertwo1.bookconverter.data.Book
+import io.github.playertwo1.bookconverter.data.BookMetadataReviewSelection
 import io.github.playertwo1.bookconverter.data.GlossaryEntry
 import io.github.playertwo1.bookconverter.data.MemoryCategory
 import io.github.playertwo1.bookconverter.data.MemoryStatus
@@ -20,6 +30,8 @@ import io.github.playertwo1.bookconverter.data.ProviderSettings
 import io.github.playertwo1.bookconverter.data.Series
 import io.github.playertwo1.bookconverter.data.SeriesMemoryEntry
 import io.github.playertwo1.bookconverter.data.SeriesSummary
+import io.github.playertwo1.bookconverter.data.applyMetadataToBook
+import io.github.playertwo1.bookconverter.data.applyMetadataToSeries
 import io.github.playertwo1.bookconverter.data.label
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -37,11 +49,52 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
+data class BookMetadataLookupUiState(
+    val isLoading: Boolean = false,
+    val hasSearched: Boolean = false,
+    val candidates: List<AggregatedBookCandidate> = emptyList(),
+    val activeSources: List<MetadataSource> = emptyList(),
+    val warnings: List<String> = emptyList(),
+    val error: String? = null,
+)
+
+internal fun buildMetadataLookupUiState(response: AggregatedSearchResponse): BookMetadataLookupUiState {
+    val warnings = response.failedSources.map { "${it.source.displayName}: ${it.message}" }
+    val allFailed = response.activeSources.isEmpty() && response.failedSources.isNotEmpty()
+    return BookMetadataLookupUiState(
+        isLoading = false,
+        hasSearched = true,
+        candidates = response.candidates,
+        activeSources = response.activeSources,
+        warnings = warnings,
+        error = if (allFailed) warnings.joinToString(" ") else null,
+    )
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
 class SeriesViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
     private val seriesDao = db.series()
     private val bookDao = db.books()
     private val settings = ProviderSettings(app)
+    private val appVersion: String = runCatching {
+        app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()
+    }.getOrDefault("1.0")
+    private val metadataAggregator: BookMetadataAggregator by lazy {
+        BookMetadataAggregator(
+            listOf(
+                OpenLibraryMetadataProvider(appVersion = appVersion),
+                WikidataMetadataProvider(appVersion = appVersion),
+                HardcoverMetadataProvider(
+                    tokenProvider = { settings.hardcoverToken() },
+                    appVersion = appVersion,
+                ),
+            )
+        )
+    }
+    private var metadataSearchJob: Job? = null
+    private val _metadataLookupState = MutableStateFlow(BookMetadataLookupUiState())
+    val metadataLookupState: StateFlow<BookMetadataLookupUiState> = _metadataLookupState.asStateFlow()
 
     val seriesList: StateFlow<List<SeriesSummary>> = seriesDao.observeAllSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -88,26 +141,43 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
         author: String? = null,
         styleNotes: String = "",
         linkBookId: Long? = null,
+        summary: String? = null,
+        metadataSelection: BookMetadataReviewSelection? = null,
         onCreated: (Long) -> Unit = {},
     ) {
         val trimmedName = name.trim()
         if (trimmedName.isEmpty()) return
         val cleanAuthor = author?.trim()?.ifEmpty { null }
+        val cleanSummary = summary?.trim()?.ifEmpty { null }
         viewModelScope.launch {
             try {
                 val now = System.currentTimeMillis()
-                val id = seriesDao.insertSeries(
-                    Series(
+                val baseSeries = Series(
+                    name = trimmedName,
+                    author = cleanAuthor,
+                    styleNotes = styleNotes.trim(),
+                    glossaryVersion = 1,
+                    createdAt = now,
+                    updatedAt = now,
+                    summary = cleanSummary,
+                )
+                val seriesToInsert = if (metadataSelection != null) {
+                    applyMetadataToSeries(baseSeries, metadataSelection, now).copy(
                         name = trimmedName,
                         author = cleanAuthor,
-                        styleNotes = styleNotes.trim(),
-                        glossaryVersion = 1,
-                        createdAt = now,
-                        updatedAt = now,
+                        summary = cleanSummary,
                     )
-                )
+                } else {
+                    baseSeries
+                }
+                val id = seriesDao.insertSeries(seriesToInsert)
                 if (linkBookId != null) {
-                    bookDao.setSeries(linkBookId, id)
+                    val existingBook = bookDao.byId(linkBookId)
+                    if (existingBook != null && metadataSelection != null) {
+                        bookDao.updateBook(applyMetadataToBook(existingBook, metadataSelection, targetSeriesId = id))
+                    } else {
+                        bookDao.setSeries(linkBookId, id)
+                    }
                 }
                 _selectedSeriesId.value = id
                 _message.value = "Série \"$trimmedName\" criada."
@@ -118,24 +188,98 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun updateSeries(seriesId: Long, name: String, author: String?, styleNotes: String) {
+    fun updateSeries(
+        seriesId: Long,
+        name: String,
+        author: String?,
+        styleNotes: String,
+        summary: String? = null,
+        keepExistingSummary: Boolean = true,
+    ) {
         viewModelScope.launch {
             try {
                 val current = seriesDao.byId(seriesId) ?: return@launch
                 val trimmedName = name.trim().ifEmpty { current.name }
                 val cleanAuthor = author?.trim()?.ifEmpty { null }
+                val finalSummary = if (keepExistingSummary) current.summary else summary?.trim()?.ifEmpty { null }
                 val now = System.currentTimeMillis()
                 seriesDao.updateSeries(
                     current.copy(
                         name = trimmedName,
                         author = cleanAuthor,
                         styleNotes = styleNotes.trim(),
+                        summary = finalSummary,
                         updatedAt = now,
                     )
                 )
                 _message.value = "Alterações salvas."
             } catch (e: Exception) {
                 _message.value = "Erro ao salvar alterações: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun searchBookMetadata(isbn: String, title: String, author: String) {
+        val query = BookMetadataQuery(isbn = isbn, title = title, author = author)
+        if (query.isBlank) {
+            _metadataLookupState.value = BookMetadataLookupUiState(
+                error = "Informe ISBN, título ou autor para buscar.",
+            )
+            return
+        }
+        metadataSearchJob?.cancel()
+        _metadataLookupState.value = BookMetadataLookupUiState(isLoading = true)
+        metadataSearchJob = viewModelScope.launch {
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    metadataAggregator.search(query)
+                }
+                _metadataLookupState.value = buildMetadataLookupUiState(response)
+            } catch (_: CancellationException) {
+                _metadataLookupState.value = _metadataLookupState.value.copy(isLoading = false)
+            } catch (e: Exception) {
+                _metadataLookupState.value = BookMetadataLookupUiState(
+                    isLoading = false,
+                    hasSearched = true,
+                    error = "Falha na busca: ${e.message ?: e.javaClass.simpleName}",
+                )
+            }
+        }
+    }
+
+    fun cancelBookMetadataSearch() {
+        metadataSearchJob?.cancel()
+        _metadataLookupState.value = _metadataLookupState.value.copy(isLoading = false)
+    }
+
+    fun clearBookMetadataSearch() {
+        metadataSearchJob?.cancel()
+        _metadataLookupState.value = BookMetadataLookupUiState()
+    }
+
+    fun applyBookAndSeriesMetadata(
+        seriesId: Long,
+        bookId: Long?,
+        selection: BookMetadataReviewSelection,
+    ) {
+        viewModelScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                withContext(Dispatchers.IO) {
+                    val currentSeries = seriesDao.byId(seriesId)
+                    if (currentSeries != null) {
+                        seriesDao.updateSeries(applyMetadataToSeries(currentSeries, selection, now))
+                    }
+                    if (bookId != null) {
+                        val currentBook = bookDao.byId(bookId)
+                        if (currentBook != null) {
+                            bookDao.updateBook(applyMetadataToBook(currentBook, selection, targetSeriesId = seriesId))
+                        }
+                    }
+                }
+                _message.value = "Informações salvas."
+            } catch (e: Exception) {
+                _message.value = "Erro ao salvar informações: ${e.message ?: e.javaClass.simpleName}"
             }
         }
     }
