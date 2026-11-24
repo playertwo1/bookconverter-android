@@ -60,13 +60,13 @@ import io.github.playertwo1.bookconverter.core.metadata.AggregatedBookCandidate
 import io.github.playertwo1.bookconverter.core.metadata.FieldProposal
 import io.github.playertwo1.bookconverter.core.metadata.MetadataField
 import io.github.playertwo1.bookconverter.core.metadata.MetadataNamedItem
+import io.github.playertwo1.bookconverter.core.metadata.parseMetadataSources
 import io.github.playertwo1.bookconverter.core.metadata.MetadataSource
-import io.github.playertwo1.bookconverter.core.metadata.normalizeEntityComparisonKey
-import io.github.playertwo1.bookconverter.core.metadata.parseNamedItems
 import io.github.playertwo1.bookconverter.data.Book
 import io.github.playertwo1.bookconverter.data.BookMetadataReviewSelection
 import io.github.playertwo1.bookconverter.data.Series
 import io.github.playertwo1.bookconverter.data.defaultAppliedFields
+import io.github.playertwo1.bookconverter.data.removedMetadataFields
 import io.github.playertwo1.bookconverter.data.formatNamedItemOrigin
 import io.github.playertwo1.bookconverter.ui.theme.Accent
 import io.github.playertwo1.bookconverter.ui.theme.AccentSoft
@@ -560,21 +560,16 @@ private fun LookupReviewStep(
         }
     }
 
-    val existingCharacterKeys = remember(existingBook?.charactersJson, existingSeries?.charactersJson) {
-        (parseNamedItems(existingBook?.charactersJson) + parseNamedItems(existingSeries?.charactersJson))
-            .map { normalizeEntityComparisonKey(it.name) }
-            .toSet()
-    }
-    val existingLocationKeys = remember(existingBook?.locationsJson, existingSeries?.locationsJson) {
-        (parseNamedItems(existingBook?.locationsJson) + parseNamedItems(existingSeries?.locationsJson))
-            .map { normalizeEntityComparisonKey(it.name) }
-            .toSet()
+    var bookAuthorChecked by remember(candidate.id, existingBook?.id) {
+        val current = existingBook?.author
+        val proposed = candidate.value(MetadataField.AUTHOR)
+        val fromSearch = MetadataField.AUTHOR in parseMetadataSources(existingBook?.metadataSourcesJson)
+        mutableStateOf(proposed != null && (current.isNullOrBlank() || current.equals(proposed, ignoreCase = true) || fromSearch))
     }
 
     val characterRows = remember(candidate.id, existingBook?.id, existingSeries?.id) {
         mutableStateListOf<EditableNamedItem>().apply {
             candidate.characters.forEachIndexed { idx, item ->
-                val alreadySaved = normalizeEntityComparisonKey(item.name) in existingCharacterKeys
                 add(
                     EditableNamedItem(
                         id = "char-$idx-${item.name}",
@@ -584,8 +579,7 @@ private fun LookupReviewStep(
                         source = item.source,
                         additionalSources = item.additionalSources,
                         fromFreeText = item.fromFreeText,
-                        alreadySaved = alreadySaved,
-                        selected = !alreadySaved,
+                        selected = true,
                         addToGlossary = false,
                     )
                 )
@@ -595,7 +589,6 @@ private fun LookupReviewStep(
     val locationRows = remember(candidate.id, existingBook?.id, existingSeries?.id) {
         mutableStateListOf<EditableNamedItem>().apply {
             candidate.places.forEachIndexed { idx, item ->
-                val alreadySaved = normalizeEntityComparisonKey(item.name) in existingLocationKeys
                 add(
                     EditableNamedItem(
                         id = "loc-$idx-${item.name}",
@@ -605,8 +598,7 @@ private fun LookupReviewStep(
                         source = item.source,
                         additionalSources = item.additionalSources,
                         fromFreeText = item.fromFreeText,
-                        alreadySaved = alreadySaved,
-                        selected = !alreadySaved,
+                        selected = true,
                         addToGlossary = false,
                     )
                 )
@@ -614,20 +606,15 @@ private fun LookupReviewStep(
         }
     }
 
-    val combinedAuthorCurrent = listOfNotNull(
-        currentSeriesAuthor.takeIf { it.isNotBlank() },
-        existingBook?.author?.takeIf { it.isNotBlank() && !it.equals(currentSeriesAuthor, ignoreCase = true) }
-            ?.let { "Livro: $it" },
-    ).joinToString(" | ").takeIf { it.isNotBlank() }
-
     val seriesFields = listOf(
         MetadataField.SERIES_NAME to currentSeriesName.takeIf { it.isNotBlank() },
-        MetadataField.AUTHOR to combinedAuthorCurrent,
+        MetadataField.AUTHOR to currentSeriesAuthor.takeIf { it.isNotBlank() },
         MetadataField.SERIES_SUMMARY to currentSeriesSummary.takeIf { it.isNotBlank() },
     )
     val bookFields = if (existingBook != null) {
         listOf(
             MetadataField.TITLE to existingBook.title.takeIf { it.isNotBlank() },
+            MetadataField.AUTHOR to existingBook.author,
             MetadataField.SERIES_POSITION to existingBook.seriesPosition?.takeIf { it.isNotBlank() },
             MetadataField.ISBN to existingBook.isbn?.takeIf { it.isNotBlank() },
             MetadataField.PUBLISHER to existingBook.publisher?.takeIf { it.isNotBlank() },
@@ -639,12 +626,21 @@ private fun LookupReviewStep(
         emptyList()
     }
 
+    val bookRemovals = removedMetadataFields(existingBook?.metadataSourcesJson, fieldValues.keys)
+    val seriesRemovals = removedMetadataFields(existingSeries?.metadataSourcesJson, fieldValues.keys)
+    val replacesNamedItems = listOf(
+        existingBook?.charactersJson, existingBook?.locationsJson,
+        existingSeries?.charactersJson, existingSeries?.locationsJson,
+    ).any { !it.isNullOrBlank() }
+    val hasRemovals = bookRemovals.isNotEmpty() || seriesRemovals.isNotEmpty() || replacesNamedItems
+
     val appliedFieldsCount = checkedMap.count { (field, checked) ->
         checked && !fieldValues[field].isNullOrBlank()
     }
     val selectedCharactersCount = characterRows.count { it.selected && it.name.isNotBlank() }
     val selectedLocationsCount = locationRows.count { it.selected && it.name.isNotBlank() }
-    val appliedCount = appliedFieldsCount + selectedCharactersCount + selectedLocationsCount
+    val appliedCount = appliedFieldsCount + selectedCharactersCount + selectedLocationsCount +
+        (if (bookAuthorChecked && !fieldValues[MetadataField.AUTHOR].isNullOrBlank()) 1 else 0)
 
     Column(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -697,6 +693,19 @@ private fun LookupReviewStep(
                     color = TextPrimary,
                 )
             }
+            if (hasRemovals) {
+                item {
+                    val changes = listOfNotNull(
+                        bookRemovals.takeIf { it.isNotEmpty() }?.joinToString(prefix = "Livro: ") { it.labelPtBr },
+                        seriesRemovals.takeIf { it.isNotEmpty() }?.joinToString(prefix = "Série: ") { it.labelPtBr },
+                        "Personagens e locais anteriores serão substituídos pelos selecionados.".takeIf { replacesNamedItems },
+                    )
+                    Text(
+                        text = (listOf("A confirmação remove dados da busca anterior que faltam neste resultado.") + changes).joinToString("\n"),
+                        color = TextSecondary,
+                    )
+                }
+            }
             items(seriesFields, key = { "series-${it.first.name}" }) { (field, existingVal) ->
                 val proposal = candidate.fields[field]
                 ReviewFieldCard(
@@ -727,7 +736,7 @@ private fun LookupReviewStep(
                         color = TextPrimary,
                     )
                     Text(
-                        text = "Campos que o livro já possui vêm desmarcados para evitar sobrescrita sem confirmação.",
+                        text = "Dados locais diferentes ficam desmarcados.",
                         color = TextSecondary,
                         fontSize = 12.sp,
                     )
@@ -740,9 +749,11 @@ private fun LookupReviewStep(
                         currentValue = existingVal,
                         editedValue = fieldValues[field].orEmpty(),
                         selectedSource = fieldSources[field],
-                        checked = checkedMap[field] == true,
+                        checked = if (field == MetadataField.AUTHOR) bookAuthorChecked else checkedMap[field] == true,
                         multiline = field == MetadataField.SUMMARY,
-                        onCheckedChange = { checkedMap[field] = it },
+                        onCheckedChange = {
+                            if (field == MetadataField.AUTHOR) bookAuthorChecked = it else checkedMap[field] = it
+                        },
                         onValueChange = { fieldValues[field] = it },
                         onPickOption = { value, src ->
                             fieldValues[field] = value
@@ -891,7 +902,11 @@ private fun LookupReviewStep(
                         onConfirm(
                             BookMetadataReviewSelection(
                                 values = fieldValues.toMap(),
-                                sources = fieldSources.toMap(),
+                                sources = fieldSources.filter { (field, source) ->
+                                    val proposal = candidate.fields[field]
+                                    proposal?.options?.any { it.source == source && it.value == fieldValues[field] } == true ||
+                                        (proposal?.selectedSource == source && proposal.selectedValue == fieldValues[field])
+                                },
                                 appliedFields = applied,
                                 openLibraryKey = candidate.openLibraryKey,
                                 wikidataQid = candidate.wikidataQid,
@@ -903,10 +918,11 @@ private fun LookupReviewStep(
                                 locations = confirmedLocs,
                                 charactersForGlossary = glossaryChars,
                                 locationsForGlossary = glossaryLocs,
+                                bookAuthorApplied = existingBook != null && bookAuthorChecked,
                             )
                         )
                     },
-                    enabled = appliedCount > 0,
+                    enabled = appliedCount > 0 || hasRemovals,
                     colors = ButtonDefaults.buttonColors(containerColor = Positive, contentColor = TextPrimary),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
@@ -914,7 +930,7 @@ private fun LookupReviewStep(
                         .defaultMinSize(minHeight = 48.dp),
                 ) {
                     Text(
-                        text = if (appliedCount > 0) "Confirmar e aplicar ($appliedCount)" else "Marque ao menos 1 item",
+                        text = if (appliedCount > 0) "Confirmar e aplicar ($appliedCount)" else if (hasRemovals) "Confirmar remoção" else "Marque ao menos 1 item",
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -933,7 +949,6 @@ private data class EditableNamedItem(
     val source: MetadataSource,
     val additionalSources: Set<MetadataSource>,
     val fromFreeText: Boolean,
-    val alreadySaved: Boolean,
     val selected: Boolean,
     val addToGlossary: Boolean = false,
 ) {
@@ -990,7 +1005,7 @@ private fun ReviewNamedItemCard(
                     )
                     Column(Modifier.weight(1f)) {
                         Text(
-                            text = "Origem: $originLabel" + if (item.alreadySaved) " · Já salvo" else "",
+                            text = "Origem: $originLabel",
                             color = if (item.fromFreeText) Accent else TextSecondary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,

@@ -4,7 +4,6 @@ import io.github.playertwo1.bookconverter.core.metadata.AggregatedBookCandidate
 import io.github.playertwo1.bookconverter.core.metadata.MetadataField
 import io.github.playertwo1.bookconverter.core.metadata.MetadataNamedItem
 import io.github.playertwo1.bookconverter.core.metadata.MetadataSource
-import io.github.playertwo1.bookconverter.core.metadata.mergeNamedItems
 import io.github.playertwo1.bookconverter.core.metadata.normalizeEntityComparisonKey
 import io.github.playertwo1.bookconverter.core.metadata.normalizeIsbn
 import io.github.playertwo1.bookconverter.core.metadata.normalizeSeriesPosition
@@ -15,8 +14,8 @@ import io.github.playertwo1.bookconverter.core.metadata.serializeNamedItems
 import io.github.playertwo1.bookconverter.core.metadata.trimToBriefSummary
 
 /**
- * Confirmed metadata edits from the review screen. Only fields present in [appliedFields]
- * and explicitly checked [characters]/[locations] are written; unchecked fields keep existing values.
+ * Confirmed review. Fields absent from the new result clear prior search values.
+ * Characters and locations are replaced with the confirmed lists.
  */
 data class BookMetadataReviewSelection(
     val values: Map<MetadataField, String>,
@@ -32,9 +31,12 @@ data class BookMetadataReviewSelection(
     val locations: List<MetadataNamedItem> = emptyList(),
     val charactersForGlossary: List<MetadataNamedItem> = emptyList(),
     val locationsForGlossary: List<MetadataNamedItem> = emptyList(),
+    val bookAuthorApplied: Boolean = MetadataField.AUTHOR in appliedFields,
 ) {
-    fun appliedValue(field: MetadataField): String? {
-        if (field !in appliedFields) return null
+    fun appliedValue(field: MetadataField, book: Boolean = false): String? {
+        if (field == MetadataField.AUTHOR && book) {
+            if (!bookAuthorApplied) return null
+        } else if (field !in appliedFields) return null
         val raw = values[field]?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         return when (field) {
             MetadataField.ISBN -> normalizeIsbn(raw) ?: raw
@@ -50,23 +52,6 @@ data class BookMetadataReviewSelection(
             .sortedBy { it.ordinal }
 }
 
-private val BOOK_FIELDS = setOf(
-    MetadataField.TITLE,
-    MetadataField.AUTHOR,
-    MetadataField.ISBN,
-    MetadataField.PUBLISHER,
-    MetadataField.PUBLISHED_DATE,
-    MetadataField.LANGUAGE,
-    MetadataField.SUMMARY,
-    MetadataField.SERIES_POSITION,
-)
-
-private val SERIES_FIELDS = setOf(
-    MetadataField.SERIES_NAME,
-    MetadataField.AUTHOR,
-    MetadataField.SERIES_SUMMARY,
-)
-
 /**
  * Builds the default set of checked fields for the review screen:
  * auto-checks fields that are currently blank on the target book/series, and leaves fields
@@ -81,72 +66,76 @@ fun defaultAppliedFields(
     currentSeriesSummary: String = existingSeries?.summary.orEmpty(),
 ): Set<MetadataField> {
     val result = linkedSetOf<MetadataField>()
-    fun consider(field: MetadataField, existingValue: String?) {
+    fun consider(field: MetadataField, existingValue: String?, sources: Map<MetadataField, MetadataSource>) {
         val proposed = candidate.value(field)?.trim()?.takeIf { it.isNotEmpty() } ?: return
         val current = existingValue?.trim()?.takeIf { it.isNotEmpty() }
-        if (current == null || current.equals(proposed, ignoreCase = true)) {
+        if (current == null || current.equals(proposed, ignoreCase = true) || field in sources) {
             result += field
         }
     }
 
-    consider(MetadataField.SERIES_NAME, currentSeriesName)
-    consider(MetadataField.SERIES_SUMMARY, currentSeriesSummary)
-    consider(MetadataField.AUTHOR, currentSeriesAuthor.ifBlank { existingBook?.author.orEmpty() })
+    val seriesSources = parseMetadataSources(existingSeries?.metadataSourcesJson)
+    consider(MetadataField.SERIES_NAME, currentSeriesName, seriesSources)
+    consider(MetadataField.SERIES_SUMMARY, currentSeriesSummary, seriesSources)
+    consider(MetadataField.AUTHOR, currentSeriesAuthor, seriesSources)
 
     if (existingBook != null) {
-        consider(MetadataField.TITLE, existingBook.title)
-        consider(MetadataField.ISBN, existingBook.isbn)
-        consider(MetadataField.PUBLISHER, existingBook.publisher)
-        consider(MetadataField.PUBLISHED_DATE, existingBook.publishedDate)
-        consider(MetadataField.LANGUAGE, existingBook.language)
-        consider(MetadataField.SUMMARY, existingBook.summary)
-        consider(MetadataField.SERIES_POSITION, existingBook.seriesPosition)
+        val bookSources = parseMetadataSources(existingBook.metadataSourcesJson)
+        consider(MetadataField.TITLE, existingBook.title, bookSources)
+        consider(MetadataField.ISBN, existingBook.isbn, bookSources)
+        consider(MetadataField.PUBLISHER, existingBook.publisher, bookSources)
+        consider(MetadataField.PUBLISHED_DATE, existingBook.publishedDate, bookSources)
+        consider(MetadataField.LANGUAGE, existingBook.language, bookSources)
+        consider(MetadataField.SUMMARY, existingBook.summary, bookSources)
+        consider(MetadataField.SERIES_POSITION, existingBook.seriesPosition, bookSources)
     }
     return result
 }
+
+fun removedMetadataFields(
+    json: String?,
+    candidateFields: Set<MetadataField>,
+): Set<MetadataField> = parseMetadataSources(json).keys - candidateFields
+
+fun Book.hasLinkedMetadata(): Boolean =
+    listOf(metadataSourcesJson, openLibraryKey, wikidataQid, hardcoverId, charactersJson, locationsJson).any { it != null }
+
+fun Series.hasLinkedMetadata(): Boolean =
+    listOf(metadataSourcesJson, openLibraryKey, wikidataQid, hardcoverId, charactersJson, locationsJson).any { it != null }
+
+fun Book.unlinkMetadata(): Book = applyMetadataToBook(this, emptyMetadataSelection)
+
+fun Series.unlinkMetadata(now: Long): Series = applyMetadataToSeries(this, emptyMetadataSelection, now)
+
+private val emptyMetadataSelection = BookMetadataReviewSelection(emptyMap(), emptyMap(), emptySet())
 
 fun applyMetadataToBook(
     existing: Book,
     selection: BookMetadataReviewSelection,
     targetSeriesId: Long? = existing.seriesId,
 ): Book {
-    val mergedSources = parseMetadataSources(existing.metadataSourcesJson).toMutableMap()
-    val appliedBookFields = selection.appliedFields.intersect(BOOK_FIELDS)
-    for (field in appliedBookFields) {
-        if (selection.appliedValue(field) != null) {
-            selection.sources[field]?.let { mergedSources[field] = it }
-        }
-    }
-    val mergedCharacters = if (selection.characters.isNotEmpty()) {
-        serializeNamedItems(mergeNamedItems(parseNamedItems(existing.charactersJson), selection.characters))
-    } else {
-        existing.charactersJson
-    }
-    val mergedLocations = if (selection.locations.isNotEmpty()) {
-        serializeNamedItems(mergeNamedItems(parseNamedItems(existing.locationsJson), selection.locations))
-    } else {
-        existing.locationsJson
-    }
-    val hasAnyBookUpdate = appliedBookFields.any { selection.appliedValue(it) != null } ||
-        selection.characters.isNotEmpty() ||
-        selection.locations.isNotEmpty()
+    val removed = removedMetadataFields(existing.metadataSourcesJson, selection.values.keys)
+    val sources = (parseMetadataSources(existing.metadataSourcesJson) - removed).toMutableMap()
+    fun value(field: MetadataField, current: String?): String? =
+        selection.resolveValue(field, current, removed, sources, book = true)
 
     return existing.copy(
-        title = selection.appliedValue(MetadataField.TITLE) ?: existing.title,
-        author = selection.appliedValue(MetadataField.AUTHOR) ?: existing.author,
-        isbn = selection.appliedValue(MetadataField.ISBN) ?: existing.isbn,
-        publisher = selection.appliedValue(MetadataField.PUBLISHER) ?: existing.publisher,
-        publishedDate = selection.appliedValue(MetadataField.PUBLISHED_DATE) ?: existing.publishedDate,
-        language = selection.appliedValue(MetadataField.LANGUAGE) ?: existing.language,
-        summary = selection.appliedValue(MetadataField.SUMMARY) ?: existing.summary,
-        seriesPosition = selection.appliedValue(MetadataField.SERIES_POSITION) ?: existing.seriesPosition,
-        seriesId = targetSeriesId ?: existing.seriesId,
-        openLibraryKey = if (hasAnyBookUpdate) (selection.openLibraryKey ?: existing.openLibraryKey) else existing.openLibraryKey,
-        wikidataQid = if (hasAnyBookUpdate) (selection.wikidataQid ?: existing.wikidataQid) else existing.wikidataQid,
-        hardcoverId = if (hasAnyBookUpdate) (selection.hardcoverId ?: existing.hardcoverId) else existing.hardcoverId,
-        metadataSourcesJson = serializeMetadataSources(mergedSources),
-        charactersJson = mergedCharacters,
-        locationsJson = mergedLocations,
+        title = value(MetadataField.TITLE, existing.title)
+            ?: existing.sourceName.substringBeforeLast('.').ifBlank { "Livro sem título" },
+        author = value(MetadataField.AUTHOR, existing.author),
+        isbn = value(MetadataField.ISBN, existing.isbn),
+        publisher = value(MetadataField.PUBLISHER, existing.publisher),
+        publishedDate = value(MetadataField.PUBLISHED_DATE, existing.publishedDate),
+        language = value(MetadataField.LANGUAGE, existing.language),
+        summary = value(MetadataField.SUMMARY, existing.summary),
+        seriesPosition = value(MetadataField.SERIES_POSITION, existing.seriesPosition),
+        seriesId = targetSeriesId,
+        openLibraryKey = selection.openLibraryKey,
+        wikidataQid = selection.wikidataQid,
+        hardcoverId = selection.hardcoverId,
+        metadataSourcesJson = serializeMetadataSources(sources),
+        charactersJson = serializeNamedItems(selection.characters),
+        locationsJson = serializeNamedItems(selection.locations),
     )
 }
 
@@ -155,39 +144,38 @@ fun applyMetadataToSeries(
     selection: BookMetadataReviewSelection,
     now: Long,
 ): Series {
-    val mergedSources = parseMetadataSources(existing.metadataSourcesJson).toMutableMap()
-    val appliedSeriesFields = selection.appliedFields.intersect(SERIES_FIELDS)
-    for (field in appliedSeriesFields) {
-        if (selection.appliedValue(field) != null) {
-            selection.sources[field]?.let { mergedSources[field] = it }
-        }
-    }
-    val mergedCharacters = if (selection.characters.isNotEmpty()) {
-        serializeNamedItems(mergeNamedItems(parseNamedItems(existing.charactersJson), selection.characters))
-    } else {
-        existing.charactersJson
-    }
-    val mergedLocations = if (selection.locations.isNotEmpty()) {
-        serializeNamedItems(mergeNamedItems(parseNamedItems(existing.locationsJson), selection.locations))
-    } else {
-        existing.locationsJson
-    }
-    val hasAnySeriesUpdate = appliedSeriesFields.any { selection.appliedValue(it) != null } ||
-        selection.characters.isNotEmpty() ||
-        selection.locations.isNotEmpty()
+    val removed = removedMetadataFields(existing.metadataSourcesJson, selection.values.keys)
+    val sources = (parseMetadataSources(existing.metadataSourcesJson) - removed).toMutableMap()
+    fun value(field: MetadataField, current: String?): String? =
+        selection.resolveValue(field, current, removed, sources, book = false)
 
     return existing.copy(
-        name = selection.appliedValue(MetadataField.SERIES_NAME) ?: existing.name,
-        author = selection.appliedValue(MetadataField.AUTHOR) ?: existing.author,
-        summary = selection.appliedValue(MetadataField.SERIES_SUMMARY) ?: existing.summary,
-        openLibraryKey = if (hasAnySeriesUpdate) (selection.seriesOpenLibraryKey ?: existing.openLibraryKey) else existing.openLibraryKey,
-        wikidataQid = if (hasAnySeriesUpdate) (selection.seriesWikidataQid ?: existing.wikidataQid) else existing.wikidataQid,
-        hardcoverId = if (hasAnySeriesUpdate) (selection.seriesHardcoverId ?: existing.hardcoverId) else existing.hardcoverId,
-        metadataSourcesJson = serializeMetadataSources(mergedSources),
-        charactersJson = mergedCharacters,
-        locationsJson = mergedLocations,
+        name = value(MetadataField.SERIES_NAME, existing.name) ?: "Série sem nome",
+        author = value(MetadataField.AUTHOR, existing.author),
+        summary = value(MetadataField.SERIES_SUMMARY, existing.summary),
+        openLibraryKey = selection.seriesOpenLibraryKey,
+        wikidataQid = selection.seriesWikidataQid,
+        hardcoverId = selection.seriesHardcoverId,
+        metadataSourcesJson = serializeMetadataSources(sources),
+        charactersJson = serializeNamedItems(selection.characters),
+        locationsJson = serializeNamedItems(selection.locations),
         updatedAt = now,
     )
+}
+
+private fun BookMetadataReviewSelection.resolveValue(
+    field: MetadataField,
+    current: String?,
+    removed: Set<MetadataField>,
+    provenance: MutableMap<MetadataField, MetadataSource>,
+    book: Boolean,
+): String? {
+    val incoming = appliedValue(field, book)
+    if (incoming == null) return current.takeUnless { field in removed }
+    if (incoming == current && field !in provenance) return current
+    val source = sources[field]
+    if (source == null) provenance.remove(field) else provenance[field] = source
+    return incoming
 }
 
 /**

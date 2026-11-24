@@ -8,7 +8,6 @@ import io.github.playertwo1.bookconverter.core.metadata.MetadataNamedItem
 import io.github.playertwo1.bookconverter.core.metadata.MetadataSource
 import io.github.playertwo1.bookconverter.core.metadata.parseMetadataSources
 import io.github.playertwo1.bookconverter.core.metadata.parseNamedItems
-import io.github.playertwo1.bookconverter.core.metadata.serializeNamedItems
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -142,63 +141,64 @@ class BookMetadataApplierTest {
     }
 
     @Test
-    fun applyMetadataMergesCharactersAndLocationsWithoutLosingExistingItems() {
-        val existingChars = serializeNamedItems(
-            listOf(
-                MetadataNamedItem(
-                    name = "Paul Atreides",
-                    source = MetadataSource.OPEN_LIBRARY,
-                    fromFreeText = true,
-                )
-            )
+    fun correctionReplacesPreviousLookupWithoutClearingManualFields() {
+        val source = MetadataSource.OPEN_LIBRARY
+        val summary = MetadataField.SUMMARY
+        val seriesSummary = MetadataField.SERIES_SUMMARY
+        val wrong = BookMetadataReviewSelection(
+            values = mapOf(summary to "Resumo errado", seriesSummary to "Saga errada"),
+            sources = mapOf(summary to source, seriesSummary to source),
+            appliedFields = setOf(summary, seriesSummary),
+            openLibraryKey = "/works/wrong",
+            seriesOpenLibraryKey = "wrong-series",
+            characters = listOf(MetadataNamedItem("Personagem errado", source = source)),
+            locations = listOf(MetadataNamedItem("Local errado", source = source)),
         )
-        val book = sampleBook(charactersJson = existingChars)
-        val series = sampleSeries(charactersJson = existingChars)
+        val wrongBook = applyMetadataToBook(sampleBook(), wrong)
+        val wrongSeries = applyMetadataToSeries(sampleSeries(), wrong, now = 200L)
+        val right = BookMetadataReviewSelection(
+            values = mapOf(MetadataField.ISBN to "9780441172719"),
+            sources = mapOf(MetadataField.ISBN to source),
+            appliedFields = setOf(MetadataField.ISBN),
+            characters = listOf(MetadataNamedItem("Personagem certo", source = MetadataSource.WIKIDATA)),
+        )
 
+        val correctedBook = applyMetadataToBook(wrongBook, right)
+        val correctedSeries = applyMetadataToSeries(wrongSeries, right, now = 300L)
+        assertEquals(setOf(summary), removedMetadataFields(wrongBook.metadataSourcesJson, right.values.keys))
+        assertEquals(null, correctedBook.summary)
+        assertEquals(null, correctedBook.openLibraryKey)
+        assertEquals(null, correctedBook.locationsJson)
+        assertEquals("Editora Local", correctedBook.publisher)
+        assertEquals(listOf("Personagem certo"), parseNamedItems(correctedBook.charactersJson).map { it.name })
+        assertEquals(null, correctedSeries.summary)
+        assertEquals(null, correctedSeries.openLibraryKey)
+        assertEquals(null, correctedSeries.locationsJson)
+        assertEquals("Tom solene", correctedSeries.styleNotes)
+        assertEquals(listOf("Personagem certo"), parseNamedItems(correctedSeries.charactersJson).map { it.name })
+    }
+
+    @Test
+    fun unlinkClearsLookupAndKeepsManualValuesAndSeriesMembership() {
+        val source = MetadataSource.WIKIDATA
+        val author = MetadataField.AUTHOR
         val selection = BookMetadataReviewSelection(
-            values = emptyMap(),
-            sources = emptyMap(),
-            appliedFields = emptySet(),
-            characters = listOf(
-                MetadataNamedItem(
-                    name = "Paul Atreides",
-                    description = "Protagonista",
-                    aliases = listOf("Muad'Dib"),
-                    source = MetadataSource.WIKIDATA,
-                    fromFreeText = false,
-                ),
-                MetadataNamedItem(
-                    name = "Chani",
-                    description = "Guerreira Fremen",
-                    source = MetadataSource.HARDCOVER,
-                    fromFreeText = false,
-                ),
-            ),
-            locations = listOf(
-                MetadataNamedItem(
-                    name = "Arrakis",
-                    description = "Planeta desértico",
-                    source = MetadataSource.WIKIDATA,
-                    fromFreeText = false,
-                ),
-            ),
+            values = mapOf(author to "Autor da série"),
+            sources = mapOf(author to source),
+            appliedFields = setOf(author),
+            bookAuthorApplied = false,
+            wikidataQid = "Q123",
+            seriesWikidataQid = "Q456",
+            locations = listOf(MetadataNamedItem("Vale", source = source)),
         )
-
-        val updatedBook = applyMetadataToBook(book, selection, targetSeriesId = 1L)
-        val savedBookChars = parseNamedItems(updatedBook.charactersJson)
-        assertEquals(listOf("Paul Atreides", "Chani"), savedBookChars.map { it.name })
-        assertEquals(MetadataSource.WIKIDATA, savedBookChars[0].source)
-        assertEquals(setOf(MetadataSource.OPEN_LIBRARY), savedBookChars[0].additionalSources)
-        assertEquals("Protagonista", savedBookChars[0].description)
-        assertEquals(listOf("Arrakis"), parseNamedItems(updatedBook.locationsJson).map { it.name })
-
-        val updatedSeries = applyMetadataToSeries(series, selection, now = 300L)
-        assertEquals(listOf("Paul Atreides", "Chani"), parseNamedItems(updatedSeries.charactersJson).map { it.name })
-        assertEquals(listOf("Arrakis"), parseNamedItems(updatedSeries.locationsJson).map { it.name })
-        assertEquals(
-            "Fontes: Open Library, Wikidata, Hardcover",
-            formatSourceAttribution(updatedSeries.metadataSourcesJson, updatedSeries.charactersJson, updatedSeries.locationsJson),
-        )
+        val book = sampleBook(author = "Autor do livro")
+        val series = sampleSeries(author = null)
+        val linkedBook = applyMetadataToBook(book, selection)
+        val linkedSeries = applyMetadataToSeries(series, selection, now = 200L)
+        assertEquals("Autor do livro", linkedBook.author)
+        assertEquals("Autor da série", linkedSeries.author)
+        assertEquals(book, linkedBook.unlinkMetadata())
+        assertEquals(series.copy(updatedAt = 300L), linkedSeries.unlinkMetadata(now = 300L))
     }
 
     @Test

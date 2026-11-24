@@ -9,6 +9,10 @@ import io.github.playertwo1.bookconverter.core.metadata.AggregatedSearchResponse
 import io.github.playertwo1.bookconverter.core.metadata.BookMetadataAggregator
 import io.github.playertwo1.bookconverter.core.metadata.BookMetadataQuery
 import io.github.playertwo1.bookconverter.core.metadata.HardcoverMetadataProvider
+import androidx.room.withTransaction
+import io.github.playertwo1.bookconverter.core.metadata.MetadataField
+import io.github.playertwo1.bookconverter.core.metadata.parseMetadataSources
+import io.github.playertwo1.bookconverter.core.metadata.serializeMetadataSources
 import io.github.playertwo1.bookconverter.core.metadata.MetadataSource
 import io.github.playertwo1.bookconverter.core.metadata.OpenLibraryMetadataProvider
 import io.github.playertwo1.bookconverter.core.metadata.SourceSearchResult
@@ -33,6 +37,7 @@ import io.github.playertwo1.bookconverter.data.SeriesSummary
 import io.github.playertwo1.bookconverter.data.applyMetadataToBook
 import io.github.playertwo1.bookconverter.data.applyMetadataToSeries
 import io.github.playertwo1.bookconverter.data.buildNewGlossaryEntries
+import io.github.playertwo1.bookconverter.data.unlinkMetadata
 import io.github.playertwo1.bookconverter.data.label
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -163,10 +168,20 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
                     summary = cleanSummary,
                 )
                 val seriesToInsert = if (metadataSelection != null) {
+                    val matchingSources = metadataSelection.sources.filterKeys { field ->
+                        val current = when (field) {
+                            MetadataField.SERIES_NAME -> trimmedName
+                            MetadataField.AUTHOR -> cleanAuthor
+                            MetadataField.SERIES_SUMMARY -> cleanSummary
+                            else -> null
+                        }
+                        current != null && current == metadataSelection.appliedValue(field)
+                    }
                     applyMetadataToSeries(baseSeries, metadataSelection, now).copy(
                         name = trimmedName,
                         author = cleanAuthor,
                         summary = cleanSummary,
+                        metadataSourcesJson = serializeMetadataSources(matchingSources),
                     )
                 } else {
                     baseSeries
@@ -222,12 +237,21 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
                 val cleanAuthor = author?.trim()?.ifEmpty { null }
                 val finalSummary = if (keepExistingSummary) current.summary else summary?.trim()?.ifEmpty { null }
                 val now = System.currentTimeMillis()
+                val sources = parseMetadataSources(current.metadataSourcesJson).filterKeys { field ->
+                    when (field) {
+                        MetadataField.SERIES_NAME -> trimmedName == current.name
+                        MetadataField.AUTHOR -> cleanAuthor == current.author
+                        MetadataField.SERIES_SUMMARY -> finalSummary == current.summary
+                        else -> true
+                    }
+                }
                 seriesDao.updateSeries(
                     current.copy(
                         name = trimmedName,
                         author = cleanAuthor,
                         styleNotes = styleNotes.trim(),
                         summary = finalSummary,
+                        metadataSourcesJson = serializeMetadataSources(sources),
                         updatedAt = now,
                     )
                 )
@@ -285,11 +309,10 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val now = System.currentTimeMillis()
                 var addedGlossaryCount = 0
-                withContext(Dispatchers.IO) {
+                db.withTransaction {
                     val currentSeries = seriesDao.byId(seriesId)
-                    if (currentSeries != null) {
-                        seriesDao.updateSeries(applyMetadataToSeries(currentSeries, selection, now))
-                    }
+                        ?: return@withTransaction
+                    seriesDao.updateSeries(applyMetadataToSeries(currentSeries, selection, now))
                     if (bookId != null) {
                         val currentBook = bookDao.byId(bookId)
                         if (currentBook != null) {
@@ -316,6 +339,24 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 _message.value = "Erro ao salvar informações: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun unlinkMetadata(seriesId: Long, bookId: Long?) {
+        viewModelScope.launch {
+            try {
+                if (bookId == null) {
+                    val series = seriesDao.byId(seriesId) ?: return@launch
+                    seriesDao.updateSeries(series.unlinkMetadata(System.currentTimeMillis()))
+                } else {
+                    val book = bookDao.byId(bookId) ?: return@launch
+                    if (book.seriesId != seriesId) return@launch
+                    bookDao.updateBook(book.unlinkMetadata())
+                }
+                _message.value = "Informações desvinculadas."
+            } catch (e: Exception) {
+                _message.value = "Erro ao desvincular informações: ${e.message ?: e.javaClass.simpleName}"
             }
         }
     }

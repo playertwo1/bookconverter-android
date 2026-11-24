@@ -74,6 +74,7 @@ import io.github.playertwo1.bookconverter.data.SeriesMemoryEntry
 import io.github.playertwo1.bookconverter.data.SeriesSummary
 import io.github.playertwo1.bookconverter.data.formatNamedItemOrigin
 import io.github.playertwo1.bookconverter.data.formatSourceAttribution
+import io.github.playertwo1.bookconverter.data.hasLinkedMetadata
 import io.github.playertwo1.bookconverter.data.suggestSeriesName
 import io.github.playertwo1.bookconverter.ui.sizeLabel
 import io.github.playertwo1.bookconverter.ui.theme.Accent
@@ -141,6 +142,7 @@ fun SeriesScreen(
             onSearchBookMetadata = vm::searchBookMetadata,
             onCancelBookMetadataSearch = vm::cancelBookMetadataSearch,
             onClearBookMetadataSearch = vm::clearBookMetadataSearch,
+            onUnlinkMetadata = { bookId -> vm.unlinkMetadata(selectedSeries!!.id, bookId) },
             onApplyBookAndSeriesMetadata = { bookId, selection ->
                 vm.applyBookAndSeriesMetadata(selectedSeries!!.id, bookId, selection)
             },
@@ -482,9 +484,12 @@ private fun SeriesDetailScreen(
     onSearchBookMetadata: (String, String, String) -> Unit,
     onCancelBookMetadataSearch: () -> Unit,
     onClearBookMetadataSearch: () -> Unit,
+    onUnlinkMetadata: (Long?) -> Unit,
     onApplyBookAndSeriesMetadata: (Long?, BookMetadataReviewSelection) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var unlinkBookId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showUnlinkMetadata by rememberSaveable { mutableStateOf(false) }
     var showRenameDialog by rememberSaveable { mutableStateOf(false) }
     var showLinkBooksDialog by rememberSaveable { mutableStateOf(false) }
     var showMetadataLookup by rememberSaveable { mutableStateOf(false) }
@@ -750,7 +755,19 @@ private fun SeriesDetailScreen(
                             .fillMaxWidth()
                             .defaultMinSize(minHeight = 48.dp),
                     ) {
-                        Text("Buscar informações do livro", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (series.hasLinkedMetadata()) "Corrigir informações do livro" else "Buscar informações do livro",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    if (series.hasLinkedMetadata()) {
+                        TextButton(
+                            onClick = { unlinkBookId = null; showUnlinkMetadata = true },
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                        ) {
+                            Text("Desvincular informações da série")
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                     if (linkedBooks.isEmpty()) {
@@ -811,6 +828,14 @@ private fun SeriesDetailScreen(
                                             modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                                         ) {
                                             Text("Desvincular", fontSize = 12.sp)
+                                        }
+                                    }
+                                    if (book.hasLinkedMetadata()) {
+                                        TextButton(
+                                            onClick = { unlinkBookId = book.id; showUnlinkMetadata = true },
+                                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                        ) {
+                                            Text("Desvincular informações")
                                         }
                                     }
                                     if (!book.summary.isNullOrBlank()) {
@@ -1459,6 +1484,26 @@ private fun SeriesDetailScreen(
                 }
             }
         }
+    }
+
+    if (showUnlinkMetadata) {
+        AlertDialog(
+            onDismissRequest = { showUnlinkMetadata = false },
+            title = { Text("Desvincular informações") },
+            text = {
+                val target = if (unlinkBookId == null) "da série" else "do livro"
+                Text("Remover os dados da busca $target? Dados manuais e termos do glossário serão mantidos.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showUnlinkMetadata = false
+                    onUnlinkMetadata(unlinkBookId)
+                }) { Text("Desvincular informações") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUnlinkMetadata = false }) { Text("Cancelar") }
+            },
+        )
     }
 
     if (showRenameDialog) {
