@@ -1492,7 +1492,7 @@ private fun SeriesDetailScreen(
             title = { Text("Desvincular informações") },
             text = {
                 val target = if (unlinkBookId == null) "da série" else "do livro"
-                Text("Remover os dados da busca $target? Dados manuais e termos do glossário serão mantidos.")
+                Text("Remover os dados da busca $target? O título do livro e o nome da série permanecem, assim como dados manuais e termos do glossário.")
             },
             confirmButton = {
                 TextButton(onClick = {

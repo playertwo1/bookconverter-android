@@ -10,6 +10,7 @@ import io.github.playertwo1.bookconverter.core.metadata.parseMetadataSources
 import io.github.playertwo1.bookconverter.core.metadata.parseNamedItems
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -199,6 +200,109 @@ class BookMetadataApplierTest {
         assertEquals("Autor da série", linkedSeries.author)
         assertEquals(book, linkedBook.unlinkMetadata())
         assertEquals(series.copy(updatedAt = 300L), linkedSeries.unlinkMetadata(now = 300L))
+    }
+
+    @Test
+    fun unlinkPreservesLookupTitleAndSeriesNameWhileClearingOtherLookupFields() {
+        val selection = BookMetadataReviewSelection(
+            values = mapOf(
+                MetadataField.TITLE to "Duna: Edição Especial",
+                MetadataField.AUTHOR to "Frank Herbert",
+                MetadataField.ISBN to "9780441172719",
+                MetadataField.PUBLISHER to "Ace Books",
+                MetadataField.PUBLISHED_DATE to "1965",
+                MetadataField.LANGUAGE to "pt",
+                MetadataField.SUMMARY to "Sinopse vinda da busca.",
+                MetadataField.SERIES_NAME to "Crônicas de Duna",
+                MetadataField.SERIES_POSITION to "1",
+                MetadataField.SERIES_SUMMARY to "Resumo da série vindo da busca.",
+            ),
+            sources = mapOf(
+                MetadataField.TITLE to MetadataSource.OPEN_LIBRARY,
+                MetadataField.AUTHOR to MetadataSource.OPEN_LIBRARY,
+                MetadataField.ISBN to MetadataSource.OPEN_LIBRARY,
+                MetadataField.PUBLISHER to MetadataSource.OPEN_LIBRARY,
+                MetadataField.PUBLISHED_DATE to MetadataSource.OPEN_LIBRARY,
+                MetadataField.LANGUAGE to MetadataSource.OPEN_LIBRARY,
+                MetadataField.SUMMARY to MetadataSource.WIKIDATA,
+                MetadataField.SERIES_NAME to MetadataSource.WIKIDATA,
+                MetadataField.SERIES_POSITION to MetadataSource.HARDCOVER,
+                MetadataField.SERIES_SUMMARY to MetadataSource.WIKIDATA,
+            ),
+            // Keep manual publisher on book and manual author on series unchecked
+            appliedFields = setOf(
+                MetadataField.TITLE,
+                MetadataField.ISBN,
+                MetadataField.PUBLISHED_DATE,
+                MetadataField.LANGUAGE,
+                MetadataField.SUMMARY,
+                MetadataField.SERIES_NAME,
+                MetadataField.SERIES_POSITION,
+                MetadataField.SERIES_SUMMARY,
+            ),
+            bookAuthorApplied = true,
+            openLibraryKey = "/works/OL893415W",
+            wikidataQid = "Q190192",
+            hardcoverId = "hc-book-1",
+            seriesOpenLibraryKey = "/works/OL-series",
+            seriesWikidataQid = "Q837705",
+            seriesHardcoverId = "hc-series-1",
+            characters = listOf(MetadataNamedItem("Paul Atreides", source = MetadataSource.WIKIDATA)),
+            locations = listOf(MetadataNamedItem("Arrakis", source = MetadataSource.OPEN_LIBRARY)),
+        )
+
+        val book = sampleBook(
+            title = "Título Inicial",
+            author = null,
+            isbn = null,
+            publisher = "Editora Manual",
+        ).copy(sourceName = "arquivo_bruto_123.epub")
+        val series = sampleSeries(
+            name = "Série Inicial",
+            author = "Autor Manual",
+            summary = null,
+        )
+
+        val linkedBook = applyMetadataToBook(book, selection, targetSeriesId = 1L)
+        val linkedSeries = applyMetadataToSeries(series, selection, now = 200L)
+        assertTrue(MetadataField.TITLE in parseMetadataSources(linkedBook.metadataSourcesJson))
+        assertTrue(MetadataField.SERIES_NAME in parseMetadataSources(linkedSeries.metadataSourcesJson))
+        assertTrue(linkedBook.hasLinkedMetadata())
+        assertTrue(linkedSeries.hasLinkedMetadata())
+
+        val unlinkedBook = linkedBook.unlinkMetadata()
+        assertEquals("Duna: Edição Especial", unlinkedBook.title)
+        assertFalse(MetadataField.TITLE in parseMetadataSources(unlinkedBook.metadataSourcesJson))
+        assertNull(unlinkedBook.metadataSourcesJson)
+        assertNull(unlinkedBook.author)
+        assertNull(unlinkedBook.isbn)
+        assertNull(unlinkedBook.publishedDate)
+        assertNull(unlinkedBook.language)
+        assertNull(unlinkedBook.summary)
+        assertNull(unlinkedBook.seriesPosition)
+        assertNull(unlinkedBook.openLibraryKey)
+        assertNull(unlinkedBook.wikidataQid)
+        assertNull(unlinkedBook.hardcoverId)
+        assertNull(unlinkedBook.charactersJson)
+        assertNull(unlinkedBook.locationsJson)
+        assertEquals("Editora Manual", unlinkedBook.publisher)
+        assertEquals(1L, unlinkedBook.seriesId)
+        assertFalse(unlinkedBook.hasLinkedMetadata())
+
+        val unlinkedSeries = linkedSeries.unlinkMetadata(now = 300L)
+        assertEquals("Crônicas de Duna", unlinkedSeries.name)
+        assertFalse(MetadataField.SERIES_NAME in parseMetadataSources(unlinkedSeries.metadataSourcesJson))
+        assertNull(unlinkedSeries.metadataSourcesJson)
+        assertNull(unlinkedSeries.summary)
+        assertNull(unlinkedSeries.openLibraryKey)
+        assertNull(unlinkedSeries.wikidataQid)
+        assertNull(unlinkedSeries.hardcoverId)
+        assertNull(unlinkedSeries.charactersJson)
+        assertNull(unlinkedSeries.locationsJson)
+        assertEquals("Autor Manual", unlinkedSeries.author)
+        assertEquals("Tom solene", unlinkedSeries.styleNotes)
+        assertEquals(300L, unlinkedSeries.updatedAt)
+        assertFalse(unlinkedSeries.hasLinkedMetadata())
     }
 
     @Test

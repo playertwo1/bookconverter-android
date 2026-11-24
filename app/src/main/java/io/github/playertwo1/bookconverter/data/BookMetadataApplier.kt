@@ -103,9 +103,11 @@ fun Book.hasLinkedMetadata(): Boolean =
 fun Series.hasLinkedMetadata(): Boolean =
     listOf(metadataSourcesJson, openLibraryKey, wikidataQid, hardcoverId, charactersJson, locationsJson).any { it != null }
 
-fun Book.unlinkMetadata(): Book = applyMetadataToBook(this, emptyMetadataSelection)
+fun Book.unlinkMetadata(): Book =
+    applyMetadataToBook(this, emptyMetadataSelection).copy(title = title)
 
-fun Series.unlinkMetadata(now: Long): Series = applyMetadataToSeries(this, emptyMetadataSelection, now)
+fun Series.unlinkMetadata(now: Long): Series =
+    applyMetadataToSeries(this, emptyMetadataSelection, now).copy(name = name)
 
 private val emptyMetadataSelection = BookMetadataReviewSelection(emptyMap(), emptyMap(), emptySet())
 

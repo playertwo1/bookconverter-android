@@ -26,12 +26,14 @@ import io.github.playertwo1.bookconverter.core.translate.GlossaryTerm
 import io.github.playertwo1.bookconverter.core.translate.SeriesMemoryExtractor
 import io.github.playertwo1.bookconverter.data.AppDatabase
 import io.github.playertwo1.bookconverter.data.Book
+import io.github.playertwo1.bookconverter.data.BookDao
 import io.github.playertwo1.bookconverter.data.BookMetadataReviewSelection
 import io.github.playertwo1.bookconverter.data.GlossaryEntry
 import io.github.playertwo1.bookconverter.data.MemoryCategory
 import io.github.playertwo1.bookconverter.data.MemoryStatus
 import io.github.playertwo1.bookconverter.data.ProviderSettings
 import io.github.playertwo1.bookconverter.data.Series
+import io.github.playertwo1.bookconverter.data.SeriesDao
 import io.github.playertwo1.bookconverter.data.SeriesMemoryEntry
 import io.github.playertwo1.bookconverter.data.SeriesSummary
 import io.github.playertwo1.bookconverter.data.applyMetadataToBook
@@ -75,6 +77,24 @@ internal fun buildMetadataLookupUiState(response: AggregatedSearchResponse): Boo
         warnings = warnings,
         error = if (allFailed) warnings.joinToString(" ") else null,
     )
+}
+
+internal suspend fun unlinkMetadataInStorage(
+    seriesDao: SeriesDao,
+    bookDao: BookDao,
+    seriesId: Long,
+    bookId: Long?,
+    now: Long = System.currentTimeMillis(),
+): Boolean {
+    if (bookId == null) {
+        val series = seriesDao.byId(seriesId) ?: return false
+        seriesDao.updateSeries(series.unlinkMetadata(now))
+    } else {
+        val book = bookDao.byId(bookId) ?: return false
+        if (book.seriesId != seriesId) return false
+        bookDao.updateBook(book.unlinkMetadata())
+    }
+    return true
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -346,15 +366,9 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
     fun unlinkMetadata(seriesId: Long, bookId: Long?) {
         viewModelScope.launch {
             try {
-                if (bookId == null) {
-                    val series = seriesDao.byId(seriesId) ?: return@launch
-                    seriesDao.updateSeries(series.unlinkMetadata(System.currentTimeMillis()))
-                } else {
-                    val book = bookDao.byId(bookId) ?: return@launch
-                    if (book.seriesId != seriesId) return@launch
-                    bookDao.updateBook(book.unlinkMetadata())
+                if (unlinkMetadataInStorage(seriesDao, bookDao, seriesId, bookId)) {
+                    _message.value = "Informações desvinculadas."
                 }
-                _message.value = "Informações desvinculadas."
             } catch (e: Exception) {
                 _message.value = "Erro ao desvincular informações: ${e.message ?: e.javaClass.simpleName}"
             }
