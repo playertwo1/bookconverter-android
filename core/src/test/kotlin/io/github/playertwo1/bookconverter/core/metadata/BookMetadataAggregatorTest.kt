@@ -107,6 +107,138 @@ class BookMetadataAggregatorTest {
   }
 
   @Test
+  fun mergesIsbn10WithXCheckDigitAndRanksRequestedEditionAboveMultiSourceCompetitor() = runBlocking {
+    val isbn10WithX = SourceBookCandidate(
+      source = MetadataSource.OPEN_LIBRARY,
+      title = "Livro Alfa",
+      isbn = "0-439-42089-x",
+    )
+    val matchingIsbn13 = SourceBookCandidate(
+      source = MetadataSource.HARDCOVER,
+      isbn = "9780439420891",
+      publisher = "Editora Alfa",
+    )
+    val competitorOl = SourceBookCandidate(
+      source = MetadataSource.OPEN_LIBRARY,
+      title = "Livro Alfa",
+      isbn = "9780000000026",
+      publisher = "Editora Beta",
+    )
+    val competitorWd = SourceBookCandidate(
+      source = MetadataSource.WIKIDATA,
+      title = "Livro Alfa",
+      isbn = "9780000000026",
+      summary = "Sinopse da edição Beta.",
+    )
+    val competitorHc = SourceBookCandidate(
+      source = MetadataSource.HARDCOVER,
+      title = "Livro Alfa",
+      isbn = "9780000000026",
+      seriesName = "Série Alfa",
+    )
+
+    // First verify 0-439-42089-x and 9780439420891 merge cleanly without conflict
+    val mergeResp = BookMetadataAggregator(
+      listOf(isbn10WithX, matchingIsbn13).map {
+        StubProvider(it.source, SourceSearchResult.Success(it.source, listOf(it)))
+      }
+    ).search(BookMetadataQuery(isbn = "9780439420891"))
+    assertEquals(1, mergeResp.candidates.size)
+    assertEquals(setOf(MetadataSource.OPEN_LIBRARY, MetadataSource.HARDCOVER), mergeResp.candidates.single().sources)
+    assertFalse(mergeResp.candidates.single().fields.getValue(MetadataField.ISBN).hasConflict)
+
+    // Querying by ISBN-10 (with 'x') must rank the 1-source ISBN-13 edition above a 3-source competing edition
+    val singleSourceIsbn13 = SourceBookCandidate(
+      source = MetadataSource.OPEN_LIBRARY,
+      title = "Livro Alfa",
+      isbn = "9780439420891",
+      publisher = "Editora Alfa",
+    )
+    val ranked = BookMetadataAggregator(
+      listOf(
+        StubProvider(MetadataSource.WIKIDATA, SourceSearchResult.Success(MetadataSource.WIKIDATA, listOf(competitorWd))),
+        StubProvider(MetadataSource.HARDCOVER, SourceSearchResult.Success(MetadataSource.HARDCOVER, listOf(competitorHc))),
+        StubProvider(MetadataSource.OPEN_LIBRARY, SourceSearchResult.Success(MetadataSource.OPEN_LIBRARY, listOf(competitorOl, singleSourceIsbn13))),
+      )
+    ).search(BookMetadataQuery(isbn = "0-439-42089-x")).candidates
+
+    assertEquals(2, ranked.size)
+    assertEquals("9780439420891", ranked.first().value(MetadataField.ISBN))
+    assertEquals("9780000000026", ranked.last().value(MetadataField.ISBN))
+  }
+
+  @Test
+  fun isbnlessAndInvalidIsbnRecordsOnlyContributeWorkLevelFields() = runBlocking {
+    val edition = SourceBookCandidate(
+      source = MetadataSource.OPEN_LIBRARY,
+      isbn = "9780000000019",
+      openLibraryKey = "/works/OL1W",
+    )
+    val invalidIsbnWork = SourceBookCandidate(
+      source = MetadataSource.WIKIDATA,
+      title = "Título da Obra",
+      author = "Autora da Obra",
+      isbn = "1234567890", // invalid check digit -> treated as non-edition record
+      publisher = "Editora da Obra",
+      publishedDate = "1985",
+      language = "pt",
+      summary = "Sinopse compartilhada da obra.",
+      seriesName = "Ciclo da Obra",
+      seriesPosition = "2",
+      seriesSummary = "Resumo da série compartilhada.",
+      openLibraryKey = "/works/OL1W",
+      wikidataQid = "Q101",
+      seriesWikidataQid = "Q202",
+      characters = listOf(MetadataNamedItem("Clara", source = MetadataSource.WIKIDATA)),
+      places = listOf(MetadataNamedItem("Porto Alto", source = MetadataSource.WIKIDATA)),
+    )
+
+    val candidates = BookMetadataAggregator(
+      listOf(edition, invalidIsbnWork).map {
+        StubProvider(it.source, SourceSearchResult.Success(it.source, listOf(it)))
+      }
+    ).search(BookMetadataQuery(isbn = edition.isbn)).candidates
+
+    assertEquals(1, candidates.size)
+    val result = candidates.single()
+    assertEquals("9780000000019", result.value(MetadataField.ISBN))
+    assertFalse(result.fields.getValue(MetadataField.ISBN).hasConflict)
+    assertNull(result.value(MetadataField.TITLE))
+    assertNull(result.value(MetadataField.AUTHOR))
+    assertNull(result.value(MetadataField.PUBLISHER))
+    assertNull(result.value(MetadataField.PUBLISHED_DATE))
+    assertNull(result.value(MetadataField.LANGUAGE))
+    assertEquals(invalidIsbnWork.summary, result.value(MetadataField.SUMMARY))
+    assertEquals(invalidIsbnWork.seriesName, result.displaySeries)
+    assertEquals("2", result.displayPosition)
+    assertEquals(invalidIsbnWork.seriesSummary, result.value(MetadataField.SERIES_SUMMARY))
+    assertEquals("Q202", result.seriesWikidataQid)
+    assertEquals(listOf("Clara"), result.characters.map { it.name })
+    assertEquals(listOf("Porto Alto"), result.places.map { it.name })
+
+    // When no record has a valid ISBN, title/author search still merges editionless work records
+    val olNoIsbn = SourceBookCandidate(
+      source = MetadataSource.OPEN_LIBRARY,
+      title = "Obra Sem ISBN",
+      author = "Autora",
+      publisher = "Editora Local",
+      publishedDate = "2001",
+    )
+    val wdNoIsbn = SourceBookCandidate(
+      source = MetadataSource.WIKIDATA,
+      title = "Obra Sem ISBN",
+      author = "Autora",
+      seriesName = "Trilogia",
+      seriesPosition = "1",
+    )
+    val mergedNoIsbn = BookMetadataAggregator.mergeCandidates(listOf(olNoIsbn, wdNoIsbn))
+    assertEquals(1, mergedNoIsbn.size)
+    assertEquals(setOf(MetadataSource.OPEN_LIBRARY, MetadataSource.WIKIDATA), mergedNoIsbn.single().sources)
+    assertEquals("Editora Local", mergedNoIsbn.single().displayPublisher)
+    assertEquals("Trilogia", mergedNoIsbn.single().displaySeries)
+  }
+
+  @Test
   fun mergesSourcesPrioritizesWikidataHardcoverForPositionAndDeduplicatesCharactersAndPlaces() = runBlocking {
     val ol = SourceBookCandidate(
       source = MetadataSource.OPEN_LIBRARY,
