@@ -1,0 +1,33 @@
+{
+  "data": {
+    "editions": [
+      {
+        "isbn_13": "9780441172719",
+        "isbn_10": "0441172717",
+        "release_date": "1990-09-01",
+        "publisher": { "name": "Ace" },
+        "language": { "language": "English" },
+        "book": {
+          "id": 1001,
+          "title": "Dune",
+          "description": "Paul Atreides leads nomadic tribes in a battle to control the desert planet Arrakis and its vital spice.",
+          "release_date": "1965-08-01",
+          "release_year": 1965,
+          "contributions": [
+            { "author": { "name": "Frank Herbert" } }
+          ],
+          "book_series": [
+            {
+              "position": 1.0,
+              "series": {
+                "id": 55,
+                "name": "Dune Chronicles",
+                "description": "Epic science fiction saga spanning thousands of years on Arrakis."
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
