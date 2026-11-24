@@ -239,6 +239,73 @@ class BookMetadataAggregatorTest {
   }
 
   @Test
+  fun sharesWorkFieldsAcrossDistinctIsbnEditionsWithoutLeakingEditionFields() = runBlocking {
+    val openLibraryEdition = SourceBookCandidate(
+      source = MetadataSource.OPEN_LIBRARY,
+      title = "Duna",
+      author = "Frank Herbert",
+      isbn = "9780441172719",
+      publisher = "Ace",
+      publishedDate = "1990",
+      language = "en",
+      places = listOf(MetadataNamedItem("Arrakis", source = MetadataSource.OPEN_LIBRARY, fromFreeText = true)),
+    )
+    val hardcoverEdition = SourceBookCandidate(
+      source = MetadataSource.HARDCOVER,
+      title = "Duna",
+      author = "Frank Herbert",
+      isbn = "9780593099322",
+      publisher = "Gollancz",
+      publishedDate = "2015",
+      language = "pt",
+      summary = "Paul Atreides lidera os Fremen no planeta desértico Arrakis.",
+      seriesName = "Duna",
+      seriesPosition = "1",
+      seriesSummary = "Saga épica de ficção científica no deserto.",
+      hardcoverId = "1001",
+      seriesHardcoverId = "55",
+      characters = listOf(
+        MetadataNamedItem("Paul Atreides", source = MetadataSource.HARDCOVER, fromFreeText = false),
+      ),
+    )
+
+    val candidates = BookMetadataAggregator(
+      listOf(openLibraryEdition, hardcoverEdition).map {
+        StubProvider(it.source, SourceSearchResult.Success(it.source, listOf(it)))
+      }
+    ).search(BookMetadataQuery(title = "Duna", author = "Frank Herbert")).candidates
+
+    assertEquals(2, candidates.size)
+
+    val aceEdition = candidates.single { it.value(MetadataField.ISBN) == "9780441172719" }
+    assertEquals("Ace", aceEdition.displayPublisher)
+    assertEquals("1990", aceEdition.displayYear)
+    assertEquals("en", aceEdition.value(MetadataField.LANGUAGE))
+    assertFalse(aceEdition.fields.getValue(MetadataField.PUBLISHER).hasConflict)
+    assertFalse(aceEdition.fields.getValue(MetadataField.PUBLISHED_DATE).hasConflict)
+    assertFalse(aceEdition.fields.getValue(MetadataField.LANGUAGE).hasConflict)
+    assertEquals("Duna", aceEdition.displaySeries)
+    assertEquals("1", aceEdition.displayPosition)
+    assertEquals(hardcoverEdition.summary, aceEdition.value(MetadataField.SUMMARY))
+    assertEquals(hardcoverEdition.seriesSummary, aceEdition.value(MetadataField.SERIES_SUMMARY))
+    assertEquals("55", aceEdition.seriesHardcoverId)
+    assertEquals(listOf("Paul Atreides"), aceEdition.characters.map { it.name })
+    assertEquals(listOf("Arrakis"), aceEdition.places.map { it.name })
+
+    val gollanczEdition = candidates.single { it.value(MetadataField.ISBN) == "9780593099322" }
+    assertEquals("Gollancz", gollanczEdition.displayPublisher)
+    assertEquals("2015", gollanczEdition.displayYear)
+    assertEquals("pt", gollanczEdition.value(MetadataField.LANGUAGE))
+    assertFalse(gollanczEdition.fields.getValue(MetadataField.PUBLISHER).hasConflict)
+    assertFalse(gollanczEdition.fields.getValue(MetadataField.PUBLISHED_DATE).hasConflict)
+    assertFalse(gollanczEdition.fields.getValue(MetadataField.LANGUAGE).hasConflict)
+    assertEquals("Duna", gollanczEdition.displaySeries)
+    assertEquals("1", gollanczEdition.displayPosition)
+    assertEquals(listOf("Paul Atreides"), gollanczEdition.characters.map { it.name })
+    assertEquals(listOf("Arrakis"), gollanczEdition.places.map { it.name })
+  }
+
+  @Test
   fun mergesSourcesPrioritizesWikidataHardcoverForPositionAndDeduplicatesCharactersAndPlaces() = runBlocking {
     val ol = SourceBookCandidate(
       source = MetadataSource.OPEN_LIBRARY,

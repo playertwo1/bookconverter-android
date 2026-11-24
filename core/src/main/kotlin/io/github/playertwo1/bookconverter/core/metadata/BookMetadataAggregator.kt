@@ -113,6 +113,16 @@ class BookMetadataAggregator(
       val byIsbn = raw.groupBy { editionIsbn(it.isbn) }
       val editions = byIsbn.filterKeys { it != null }.values.toList()
       val workMatches = editions.map { mutableListOf<SourceBookCandidate>() }
+      for (idx in editions.indices) {
+        for (otherIdx in editions.indices) {
+          if (otherIdx == idx) continue
+          for (other in editions[otherIdx]) {
+            if (other.hasWorkMetadata() && editions[idx].any { isSameWork(it, other) }) {
+              workMatches[idx] += other
+            }
+          }
+        }
+      }
       val groups = mutableListOf<MutableList<SourceBookCandidate>>()
       for (candidate in byIsbn[null].orEmpty()) {
         // Only match against the edition records themselves. A work record cannot link two editions.
@@ -241,6 +251,17 @@ class BookMetadataAggregator(
     }
   }
 }
+
+private fun SourceBookCandidate.hasWorkMetadata(): Boolean =
+  !summary.isNullOrBlank() ||
+    !seriesName.isNullOrBlank() ||
+    !seriesPosition.isNullOrBlank() ||
+    !seriesSummary.isNullOrBlank() ||
+    seriesOpenLibraryKey != null ||
+    seriesWikidataQid != null ||
+    seriesHardcoverId != null ||
+    characters.isNotEmpty() ||
+    places.isNotEmpty()
 
 private fun editionIsbn(raw: String?): String? {
   val isbn = normalizeIsbn(raw) ?: return null
