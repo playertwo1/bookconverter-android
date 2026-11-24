@@ -105,7 +105,7 @@ fun SettingsScreen(onOpenProviders: () -> Unit) {
     val driveSettings = remember { GoogleDriveSettings(context) }
     val providerSettings = remember { ProviderSettings(context) }
     var hasHardcoverToken by rememberSaveable { mutableStateOf(providerSettings.hasHardcoverToken()) }
-    var hardcoverTokenInput by rememberSaveable { mutableStateOf("") }
+    var hardcoverTokenInput by remember { mutableStateOf("") }
     var hardcoverStatusMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var isDriveConnected by rememberSaveable { mutableStateOf(driveSettings.isConnected) }
     var driveEmail by rememberSaveable { mutableStateOf(driveSettings.tokens?.email ?: "Conectado") }
@@ -229,7 +229,7 @@ fun SettingsScreen(onOpenProviders: () -> Unit) {
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "Open Library e Wikidata funcionam sem chave. Cole seu token da Hardcover (opcional) para incluir essa fonte na busca de livros.",
+                "Open Library e Wikidata funcionam sem chave. Para usar a Hardcover, crie um token só de leitura do catálogo e escolha uma expiração curta.",
                 color = TextSecondary,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),

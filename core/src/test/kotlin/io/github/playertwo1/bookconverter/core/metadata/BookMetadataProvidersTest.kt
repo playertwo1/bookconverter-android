@@ -29,7 +29,7 @@ class BookMetadataProvidersTest {
   }
 
   @Test
-  fun openLibraryIsbnFetchesEditionWorkAndAuthorRespectingRateLimit() = runBlocking {
+  fun openLibraryIsbnFetchesEditionWorkAndAuthorRespectingRateLimitAndNormalizingFreeTextEntities() = runBlocking {
     val waits = mutableListOf<Long>()
     var fakeNow = 10_000L
     val limiter = MetadataRateLimiter(
@@ -66,8 +66,13 @@ class BookMetadataProvidersTest {
       assertNull("Open Library must not emit unreliable seriesPosition", c.seriesPosition)
       assertTrue((c.summary?.length ?: 0) <= 400)
       assertTrue(c.summary!!.endsWith("."))
-      assertEquals(listOf("Paul Atreides", "Lady Jessica"), c.characters)
-      assertEquals(listOf("Arrakis"), c.places)
+
+      // Noisy subject_people / subject_places are normalized, deduplicated (accent/case-insensitive),
+      // generic noise ("Fictitious characters", "Imaginary places") dropped, and flagged as free text.
+      assertEquals(listOf("Paul Atreides", "Lady Jéssica", "Duncan Idaho"), c.characters.map { it.name })
+      assertTrue(c.characters.all { it.source == MetadataSource.OPEN_LIBRARY && it.fromFreeText })
+      assertEquals(listOf("Arrakis", "Caladan"), c.places.map { it.name })
+      assertTrue(c.places.all { it.source == MetadataSource.OPEN_LIBRARY && it.fromFreeText })
 
       // 3 sequential calls at the same clock tick trigger two 1000ms waits (1 req/s)
       assertEquals(listOf(1000L, 1000L), waits)
@@ -98,6 +103,8 @@ class BookMetadataProvidersTest {
       assertEquals("Chilton Books", c.publisher)
       assertEquals("1965", c.publishedDate)
       assertEquals("en", c.language)
+      assertEquals(listOf("Paul Atreides"), c.characters.map { it.name })
+      assertEquals(listOf("Arrakis"), c.places.map { it.name })
 
       val req = server.takeRequest()
       assertTrue(req.path!!.startsWith("/search.json?"))
@@ -107,17 +114,17 @@ class BookMetadataProvidersTest {
   }
 
   @Test
-  fun wikidataParsesSeriesPositionAndHandlesHttp429RetryAfter() = runBlocking {
+  fun wikidataParsesSeriesPositionCharactersPlacesAndHandlesHttp429RetryAfter() = runBlocking {
     val retryWaits = mutableListOf<Long>()
     MockWebServer().use { server ->
       server.enqueue(MockResponse().setResponseCode(429).addHeader("Retry-After", "2"))
       server.enqueue(MockResponse().setResponseCode(200).setBody(fixture("wikidata_search.json")))
-      server.enqueue(MockResponse().setResponseCode(200).setBody(fixture("wikidata_sparql.json")))
+      server.enqueue(MockResponse().setResponseCode(200).setBody(fixture("wikidata_entities_work.json")))
+      server.enqueue(MockResponse().setResponseCode(200).setBody(fixture("wikidata_entities_refs.json")))
 
       val provider = WikidataMetadataProvider(
         appVersion = "1.0.3",
         apiBaseUrl = server.url("/").toString(),
-        sparqlBaseUrl = server.url("/").toString(),
         client = fastClient(),
         rateLimiter = MetadataRateLimiter(0L),
         retrySleepFn = { ms -> retryWaits += ms },
@@ -134,11 +141,72 @@ class BookMetadataProvidersTest {
       assertEquals("Série de livros de ficção científica criada por Frank Herbert.", c.seriesSummary)
       assertEquals("9780441172719", c.isbn)
       assertEquals("/works/OL893415W", c.openLibraryKey)
-      assertEquals(listOf("Paul Atreides"), c.characters)
-      assertEquals(listOf("Arrakis"), c.places)
+      assertEquals("en", c.language)
+
+      // P674 structured characters with descriptions and aliases
+      assertEquals(listOf("Paul Atreides", "Lady Jessica"), c.characters.map { it.name })
+      val paul = c.characters.first()
+      assertEquals(MetadataSource.WIKIDATA, paul.source)
+      assertFalse(paul.fromFreeText)
+      assertEquals("Protagonista da série Duna.", paul.description)
+      assertEquals(listOf("Muad'Dib", "Usul"), paul.aliases)
+
+      // P840 structured narrative locations with descriptions and aliases
+      assertEquals(listOf("Arrakis", "Caladan"), c.places.map { it.name })
+      val arrakis = c.places.first()
+      assertEquals(MetadataSource.WIKIDATA, arrakis.source)
+      assertFalse(arrakis.fromFreeText)
+      assertEquals("Planeta desértico fictício, fonte da especiaria melange.", arrakis.description)
+      assertEquals(listOf("Duna"), arrakis.aliases)
 
       val firstReq = server.takeRequest()
       assertEquals(MetadataUserAgent.forApp("1.0.3"), firstReq.getHeader("User-Agent"))
+    }
+  }
+
+  @Test
+  fun wikidataFiltersOutVideoGamesAndWikimediaLists() = runBlocking {
+    MockWebServer().use { server ->
+      server.enqueue(
+        MockResponse().setResponseCode(200).setBody(
+          """{"search":[{"id":"Q111"},{"id":"Q222"}]}"""
+        )
+      )
+      server.enqueue(
+        MockResponse().setResponseCode(200).setBody(
+          """
+          {
+            "entities": {
+              "Q111": {
+                "id": "Q111",
+                "labels": { "en": { "value": "Dune" } },
+                "descriptions": { "pt": { "value": "jogo eletrônico de 1992" } },
+                "claims": {
+                  "P31": [{ "mainsnak": { "datavalue": { "value": { "id": "Q7889" } } } }],
+                  "P123": [{ "mainsnak": { "datavalue": { "value": { "id": "Q99" } } } }]
+                }
+              },
+              "Q222": {
+                "id": "Q222",
+                "labels": { "en": { "value": "Dune" } },
+                "descriptions": { "pt": { "value": "lista de um projeto Wikimedia" } },
+                "claims": {
+                  "P31": [{ "mainsnak": { "datavalue": { "value": { "id": "Q13406463" } } } }]
+                }
+              }
+            }
+          }
+          """.trimIndent()
+        )
+      )
+      val provider = WikidataMetadataProvider(
+        apiBaseUrl = server.url("/").toString(),
+        client = fastClient(),
+        rateLimiter = MetadataRateLimiter(0L),
+      )
+      val res = provider.search(BookMetadataQuery(title = "Dune")) as SourceSearchResult.Success
+      assertTrue("Non-book items (video games, Wikimedia lists) must be filtered out", res.candidates.isEmpty())
+      assertEquals(2, server.requestCount)
     }
   }
 
@@ -149,7 +217,6 @@ class BookMetadataProvidersTest {
       val provider = WikidataMetadataProvider(
         appVersion = "1.0.3",
         apiBaseUrl = server.url("/").toString(),
-        sparqlBaseUrl = server.url("/").toString(),
         client = fastClient(),
         rateLimiter = MetadataRateLimiter(0L),
         maxRetryAfterMs = 5000L,
@@ -177,7 +244,7 @@ class BookMetadataProvidersTest {
   }
 
   @Test
-  fun hardcoverQueriesIsbnAndTitleWithBearerHeaderAndParsesSeriesOrder() = runBlocking {
+  fun hardcoverQueriesIsbnAndTitleWithBearerHeaderAndParsesSeriesOrderAndCharacters() = runBlocking {
     MockWebServer().use { server ->
       server.enqueue(MockResponse().setResponseCode(200).setBody(fixture("hardcover_isbn.json")))
       server.enqueue(MockResponse().setResponseCode(200).setBody(fixture("hardcover_books.json")))
@@ -198,16 +265,21 @@ class BookMetadataProvidersTest {
       assertEquals("1", book1.seriesPosition)
       assertEquals("Ace", book1.publisher)
       assertEquals("en", book1.language)
+      assertEquals(listOf("Paul Atreides", "Chani"), book1.characters.map { it.name })
+      assertEquals("Heir to House Atreides who rises as leader of the Fremen.", book1.characters.first().description)
+      assertTrue(book1.characters.all { it.source == MetadataSource.HARDCOVER && !it.fromFreeText })
 
       val req1 = server.takeRequest()
       assertEquals("Bearer hc_pat_test_token", req1.getHeader("Authorization"))
       assertEquals(MetadataUserAgent.forApp("1.0.3"), req1.getHeader("User-Agent"))
+      assertTrue(req1.body.readUtf8().contains("book_characters"))
 
       val titleRes = provider.search(BookMetadataQuery(title = "Dune Messiah", author = "Frank Herbert")) as SourceSearchResult.Success
       val book2 = titleRes.candidates.single()
       assertEquals("Dune Messiah", book2.title)
       assertEquals("2", book2.seriesPosition)
       assertEquals("9780441172696", book2.isbn)
+      assertEquals(listOf("Alia Atreides"), book2.characters.map { it.name })
     }
   }
 

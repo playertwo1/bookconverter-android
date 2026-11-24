@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 7,
-    "identityHash": "1ca0830ad710c16520b7e44ce2cfc502",
+    "identityHash": "a81a9b8554ae2c002ac52dbe990cdfb3",
     "entities": [
       {
         "tableName": "Book",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `author` TEXT, `language` TEXT, `format` TEXT NOT NULL, `sha256` TEXT NOT NULL, `privatePath` TEXT NOT NULL, `sourceName` TEXT NOT NULL, `sizeBytes` INTEGER NOT NULL, `importedAt` INTEGER NOT NULL, `seriesId` INTEGER, `isbn` TEXT, `publisher` TEXT, `publishedDate` TEXT, `summary` TEXT, `seriesPosition` TEXT, `openLibraryKey` TEXT, `wikidataQid` TEXT, `hardcoverId` TEXT, `metadataSourcesJson` TEXT)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `author` TEXT, `language` TEXT, `format` TEXT NOT NULL, `sha256` TEXT NOT NULL, `privatePath` TEXT NOT NULL, `sourceName` TEXT NOT NULL, `sizeBytes` INTEGER NOT NULL, `importedAt` INTEGER NOT NULL, `seriesId` INTEGER, `isbn` TEXT, `publisher` TEXT, `publishedDate` TEXT, `summary` TEXT, `seriesPosition` TEXT, `openLibraryKey` TEXT, `wikidataQid` TEXT, `hardcoverId` TEXT, `metadataSourcesJson` TEXT, `charactersJson` TEXT, `locationsJson` TEXT)",
         "fields": [
           {
             "fieldPath": "id",
@@ -114,6 +114,16 @@
           {
             "fieldPath": "metadataSourcesJson",
             "columnName": "metadataSourcesJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "charactersJson",
+            "columnName": "charactersJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "locationsJson",
+            "columnName": "locationsJson",
             "affinity": "TEXT"
           }
         ],
@@ -430,7 +440,7 @@
       },
       {
         "tableName": "Series",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `author` TEXT, `styleNotes` TEXT NOT NULL, `glossaryVersion` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `summary` TEXT, `openLibraryKey` TEXT, `wikidataQid` TEXT, `hardcoverId` TEXT, `metadataSourcesJson` TEXT)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `author` TEXT, `styleNotes` TEXT NOT NULL, `glossaryVersion` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `summary` TEXT, `openLibraryKey` TEXT, `wikidataQid` TEXT, `hardcoverId` TEXT, `metadataSourcesJson` TEXT, `charactersJson` TEXT, `locationsJson` TEXT)",
         "fields": [
           {
             "fieldPath": "id",
@@ -496,6 +506,16 @@
           {
             "fieldPath": "metadataSourcesJson",
             "columnName": "metadataSourcesJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "charactersJson",
+            "columnName": "charactersJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "locationsJson",
+            "columnName": "locationsJson",
             "affinity": "TEXT"
           }
         ],
@@ -706,7 +726,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1ca0830ad710c16520b7e44ce2cfc502')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a81a9b8554ae2c002ac52dbe990cdfb3')"
     ]
   }
 }

@@ -29,8 +29,8 @@ data class AggregatedBookCandidate(
   val seriesOpenLibraryKey: String? = null,
   val seriesWikidataQid: String? = null,
   val seriesHardcoverId: String? = null,
-  val characters: List<String> = emptyList(),
-  val places: List<String> = emptyList(),
+  val characters: List<MetadataNamedItem> = emptyList(),
+  val places: List<MetadataNamedItem> = emptyList(),
 ) {
   fun value(field: MetadataField): String? = fields[field]?.selectedValue
   fun sourceOf(field: MetadataField): MetadataSource? = fields[field]?.selectedSource
@@ -135,15 +135,17 @@ class BookMetadataAggregator(
       if (a.wikidataQid != null && b.wikidataQid != null && a.wikidataQid == b.wikidataQid) return true
       if (a.hardcoverId != null && b.hardcoverId != null && a.hardcoverId == b.hardcoverId) return true
 
-      val titleA = normalizeMatchText(a.title)
-      val titleB = normalizeMatchText(b.title)
-      if (titleA == null || titleB == null) return false
-      if (titleA != titleB) return false
+      val titlesA = listOfNotNull(normalizeMatchText(a.title), normalizeMatchText(a.alternateTitle)).toSet()
+      val titlesB = listOfNotNull(normalizeMatchText(b.title), normalizeMatchText(b.alternateTitle)).toSet()
+      if (titlesA.isEmpty() || titlesB.isEmpty()) return false
+      if (titlesA.intersect(titlesB).isEmpty()) return false
 
       val authorA = normalizeMatchText(a.author)
       val authorB = normalizeMatchText(b.author)
-      return authorA == null || authorB == null || authorA == authorB ||
-        authorA.contains(authorB) || authorB.contains(authorA)
+      if (authorA != null && authorB != null) {
+        return authorA == authorB || authorA.contains(authorB) || authorB.contains(authorA)
+      }
+      return authorA == null && authorB == null
     }
 
     private fun buildAggregated(id: String, group: List<SourceBookCandidate>): AggregatedBookCandidate {
@@ -217,8 +219,8 @@ class BookMetadataAggregator(
         seriesOpenLibraryKey = group.firstNotNullOfOrNull { it.seriesOpenLibraryKey },
         seriesWikidataQid = group.firstNotNullOfOrNull { it.seriesWikidataQid },
         seriesHardcoverId = group.firstNotNullOfOrNull { it.seriesHardcoverId },
-        characters = group.flatMap { it.characters }.distinct(),
-        places = group.flatMap { it.places }.distinct(),
+        characters = mergeNamedItems(emptyList(), group.flatMap { it.characters }),
+        places = mergeNamedItems(emptyList(), group.flatMap { it.places }),
       )
     }
   }

@@ -4,8 +4,11 @@ import io.github.playertwo1.bookconverter.core.metadata.AggregatedBookCandidate
 import io.github.playertwo1.bookconverter.core.metadata.FieldOption
 import io.github.playertwo1.bookconverter.core.metadata.FieldProposal
 import io.github.playertwo1.bookconverter.core.metadata.MetadataField
+import io.github.playertwo1.bookconverter.core.metadata.MetadataNamedItem
 import io.github.playertwo1.bookconverter.core.metadata.MetadataSource
 import io.github.playertwo1.bookconverter.core.metadata.parseMetadataSources
+import io.github.playertwo1.bookconverter.core.metadata.parseNamedItems
+import io.github.playertwo1.bookconverter.core.metadata.serializeNamedItems
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -18,6 +21,8 @@ class BookMetadataApplierTest {
         author: String? = "Frank Herbert",
         isbn: String? = null,
         publisher: String? = "Editora Local",
+        charactersJson: String? = null,
+        locationsJson: String? = null,
     ) = Book(
         id = 10L,
         title = title,
@@ -32,12 +37,16 @@ class BookMetadataApplierTest {
         seriesId = 1L,
         isbn = isbn,
         publisher = publisher,
+        charactersJson = charactersJson,
+        locationsJson = locationsJson,
     )
 
     private fun sampleSeries(
         name: String = "Duna",
         author: String? = "Frank Herbert",
         summary: String? = null,
+        charactersJson: String? = null,
+        locationsJson: String? = null,
     ) = Series(
         id = 1L,
         name = name,
@@ -47,6 +56,8 @@ class BookMetadataApplierTest {
         createdAt = 100L,
         updatedAt = 100L,
         summary = summary,
+        charactersJson = charactersJson,
+        locationsJson = locationsJson,
     )
 
     private fun sampleCandidate() = AggregatedBookCandidate(
@@ -128,5 +139,112 @@ class BookMetadataApplierTest {
         assertEquals("Saga de ficção científica.", updatedSeries.summary)
         assertEquals("Q837705", updatedSeries.wikidataQid)
         assertEquals("Fontes: Wikidata", formatSourceAttribution(updatedSeries.metadataSourcesJson))
+    }
+
+    @Test
+    fun applyMetadataMergesCharactersAndLocationsWithoutLosingExistingItems() {
+        val existingChars = serializeNamedItems(
+            listOf(
+                MetadataNamedItem(
+                    name = "Paul Atreides",
+                    source = MetadataSource.OPEN_LIBRARY,
+                    fromFreeText = true,
+                )
+            )
+        )
+        val book = sampleBook(charactersJson = existingChars)
+        val series = sampleSeries(charactersJson = existingChars)
+
+        val selection = BookMetadataReviewSelection(
+            values = emptyMap(),
+            sources = emptyMap(),
+            appliedFields = emptySet(),
+            characters = listOf(
+                MetadataNamedItem(
+                    name = "Paul Atreides",
+                    description = "Protagonista",
+                    aliases = listOf("Muad'Dib"),
+                    source = MetadataSource.WIKIDATA,
+                    fromFreeText = false,
+                ),
+                MetadataNamedItem(
+                    name = "Chani",
+                    description = "Guerreira Fremen",
+                    source = MetadataSource.HARDCOVER,
+                    fromFreeText = false,
+                ),
+            ),
+            locations = listOf(
+                MetadataNamedItem(
+                    name = "Arrakis",
+                    description = "Planeta desértico",
+                    source = MetadataSource.WIKIDATA,
+                    fromFreeText = false,
+                ),
+            ),
+        )
+
+        val updatedBook = applyMetadataToBook(book, selection, targetSeriesId = 1L)
+        val savedBookChars = parseNamedItems(updatedBook.charactersJson)
+        assertEquals(listOf("Paul Atreides", "Chani"), savedBookChars.map { it.name })
+        assertEquals(MetadataSource.WIKIDATA, savedBookChars[0].source)
+        assertEquals(setOf(MetadataSource.OPEN_LIBRARY), savedBookChars[0].additionalSources)
+        assertEquals("Protagonista", savedBookChars[0].description)
+        assertEquals(listOf("Arrakis"), parseNamedItems(updatedBook.locationsJson).map { it.name })
+
+        val updatedSeries = applyMetadataToSeries(series, selection, now = 300L)
+        assertEquals(listOf("Paul Atreides", "Chani"), parseNamedItems(updatedSeries.charactersJson).map { it.name })
+        assertEquals(listOf("Arrakis"), parseNamedItems(updatedSeries.locationsJson).map { it.name })
+        assertEquals(
+            "Fontes: Open Library, Wikidata, Hardcover",
+            formatSourceAttribution(updatedSeries.metadataSourcesJson, updatedSeries.charactersJson, updatedSeries.locationsJson),
+        )
+    }
+
+    @Test
+    fun buildNewGlossaryEntriesRespectsOptInAndNeverOverwritesExistingTerms() {
+        val existingGlossary = listOf(
+            GlossaryEntry(
+                id = 1L,
+                seriesId = 1L,
+                sourceTerm = "Arrakis",
+                targetTerm = "Duna (tradução do dono)",
+                updatedAt = 100L,
+            )
+        )
+
+        // Default opt-out (empty lists) produces zero glossary entries
+        assertTrue(
+            buildNewGlossaryEntries(1L, existingGlossary, emptyList(), emptyList(), now = 200L).isEmpty()
+        )
+
+        val entries = buildNewGlossaryEntries(
+            seriesId = 1L,
+            existingGlossary = existingGlossary,
+            charactersForGlossary = listOf(
+                MetadataNamedItem(
+                    name = "Paul Atreides",
+                    description = "Protagonista",
+                    source = MetadataSource.WIKIDATA,
+                    fromFreeText = false,
+                )
+            ),
+            locationsForGlossary = listOf(
+                // Already in glossary with different casing/accent -> must NOT overwrite
+                MetadataNamedItem(name = "árrakis", source = MetadataSource.OPEN_LIBRARY, fromFreeText = true),
+                MetadataNamedItem(name = "Caladan", source = MetadataSource.WIKIDATA, fromFreeText = false),
+            ),
+            now = 200L,
+        )
+
+        assertEquals(2, entries.size)
+        assertEquals("Paul Atreides", entries[0].sourceTerm)
+        assertEquals("Paul Atreides", entries[0].targetTerm)
+        assertTrue(entries[0].notes!!.contains("Personagem"))
+        assertTrue(entries[0].notes!!.contains("Wikidata"))
+
+        assertEquals("Caladan", entries[1].sourceTerm)
+        assertEquals("Caladan", entries[1].targetTerm)
+        assertTrue(entries[1].notes!!.contains("Local"))
     }
 }

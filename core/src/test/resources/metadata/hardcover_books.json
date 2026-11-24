@@ -20,6 +20,14 @@
             }
           }
         ],
+        "book_characters": [
+          {
+            "character": {
+              "name": "Alia Atreides",
+              "biography": "Sister of Paul Atreides."
+            }
+          }
+        ],
         "editions": [
           {
             "isbn_13": "9780441172696",

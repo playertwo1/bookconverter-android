@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,11 +59,15 @@ import androidx.compose.ui.window.DialogProperties
 import io.github.playertwo1.bookconverter.core.metadata.AggregatedBookCandidate
 import io.github.playertwo1.bookconverter.core.metadata.FieldProposal
 import io.github.playertwo1.bookconverter.core.metadata.MetadataField
+import io.github.playertwo1.bookconverter.core.metadata.MetadataNamedItem
 import io.github.playertwo1.bookconverter.core.metadata.MetadataSource
+import io.github.playertwo1.bookconverter.core.metadata.normalizeEntityComparisonKey
+import io.github.playertwo1.bookconverter.core.metadata.parseNamedItems
 import io.github.playertwo1.bookconverter.data.Book
 import io.github.playertwo1.bookconverter.data.BookMetadataReviewSelection
 import io.github.playertwo1.bookconverter.data.Series
 import io.github.playertwo1.bookconverter.data.defaultAppliedFields
+import io.github.playertwo1.bookconverter.data.formatNamedItemOrigin
 import io.github.playertwo1.bookconverter.ui.theme.Accent
 import io.github.playertwo1.bookconverter.ui.theme.AccentSoft
 import io.github.playertwo1.bookconverter.ui.theme.Background
@@ -484,6 +489,21 @@ private fun CandidateCard(
                     fontWeight = FontWeight.Medium,
                 )
             }
+            val entityLine = listOfNotNull(
+                candidate.characters.size.takeIf { it > 0 }?.let { n ->
+                    if (n == 1) "1 personagem" else "$n personagens"
+                },
+                candidate.places.size.takeIf { it > 0 }?.let { n ->
+                    if (n == 1) "1 local" else "$n locais"
+                },
+            ).joinToString(" · ")
+            if (entityLine.isNotEmpty()) {
+                Text(
+                    text = entityLine,
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+            }
             val sourceLine = candidate.sources
                 .sortedBy { it.ordinal }
                 .joinToString(", ") { it.displayName }
@@ -540,6 +560,60 @@ private fun LookupReviewStep(
         }
     }
 
+    val existingCharacterKeys = remember(existingBook?.charactersJson, existingSeries?.charactersJson) {
+        (parseNamedItems(existingBook?.charactersJson) + parseNamedItems(existingSeries?.charactersJson))
+            .map { normalizeEntityComparisonKey(it.name) }
+            .toSet()
+    }
+    val existingLocationKeys = remember(existingBook?.locationsJson, existingSeries?.locationsJson) {
+        (parseNamedItems(existingBook?.locationsJson) + parseNamedItems(existingSeries?.locationsJson))
+            .map { normalizeEntityComparisonKey(it.name) }
+            .toSet()
+    }
+
+    val characterRows = remember(candidate.id, existingBook?.id, existingSeries?.id) {
+        mutableStateListOf<EditableNamedItem>().apply {
+            candidate.characters.forEachIndexed { idx, item ->
+                val alreadySaved = normalizeEntityComparisonKey(item.name) in existingCharacterKeys
+                add(
+                    EditableNamedItem(
+                        id = "char-$idx-${item.name}",
+                        name = item.name,
+                        description = item.description,
+                        aliases = item.aliases,
+                        source = item.source,
+                        additionalSources = item.additionalSources,
+                        fromFreeText = item.fromFreeText,
+                        alreadySaved = alreadySaved,
+                        selected = !alreadySaved,
+                        addToGlossary = false,
+                    )
+                )
+            }
+        }
+    }
+    val locationRows = remember(candidate.id, existingBook?.id, existingSeries?.id) {
+        mutableStateListOf<EditableNamedItem>().apply {
+            candidate.places.forEachIndexed { idx, item ->
+                val alreadySaved = normalizeEntityComparisonKey(item.name) in existingLocationKeys
+                add(
+                    EditableNamedItem(
+                        id = "loc-$idx-${item.name}",
+                        name = item.name,
+                        description = item.description,
+                        aliases = item.aliases,
+                        source = item.source,
+                        additionalSources = item.additionalSources,
+                        fromFreeText = item.fromFreeText,
+                        alreadySaved = alreadySaved,
+                        selected = !alreadySaved,
+                        addToGlossary = false,
+                    )
+                )
+            }
+        }
+    }
+
     val combinedAuthorCurrent = listOfNotNull(
         currentSeriesAuthor.takeIf { it.isNotBlank() },
         existingBook?.author?.takeIf { it.isNotBlank() && !it.equals(currentSeriesAuthor, ignoreCase = true) }
@@ -565,9 +639,12 @@ private fun LookupReviewStep(
         emptyList()
     }
 
-    val appliedCount = checkedMap.count { (field, checked) ->
+    val appliedFieldsCount = checkedMap.count { (field, checked) ->
         checked && !fieldValues[field].isNullOrBlank()
     }
+    val selectedCharactersCount = characterRows.count { it.selected && it.name.isNotBlank() }
+    val selectedLocationsCount = locationRows.count { it.selected && it.name.isNotBlank() }
+    val appliedCount = appliedFieldsCount + selectedCharactersCount + selectedLocationsCount
 
     Column(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -656,8 +733,6 @@ private fun LookupReviewStep(
                     )
                 }
                 items(bookFields, key = { "book-${it.first.name}" }) { (field, existingVal) ->
-                    // Author is shared with the series section above if shown; avoid duplicate editor key if series already has it?
-                    // Keeping book author editable under book section lets user see existing book author vs series author cleanly.
                     val proposal = candidate.fields[field]
                     ReviewFieldCard(
                         field = field,
@@ -675,6 +750,100 @@ private fun LookupReviewStep(
                         },
                     )
                 }
+            }
+
+            // Section: Personagens
+            item {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Personagens (${characterRows.size})",
+                    fontFamily = Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = TextPrimary,
+                )
+                val hasFreeTextChars = characterRows.any { it.fromFreeText }
+                Text(
+                    text = when {
+                        characterRows.isEmpty() -> "Nenhum personagem encontrado nas fontes consultadas."
+                        hasFreeTextChars -> "Itens marcados como texto livre vêm da Open Library e podem conter ruído. Revise antes de salvar."
+                        else -> "Marque os personagens que deseja salvar no livro e na série."
+                    },
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+            }
+            items(characterRows, key = { it.id }) { row ->
+                ReviewNamedItemCard(
+                    item = row,
+                    onSelectedChange = { checked ->
+                        val i = characterRows.indexOfFirst { it.id == row.id }
+                        if (i >= 0) {
+                            characterRows[i] = row.copy(
+                                selected = checked,
+                                addToGlossary = if (checked) row.addToGlossary else false,
+                            )
+                        }
+                    },
+                    onNameChange = { newName ->
+                        val i = characterRows.indexOfFirst { it.id == row.id }
+                        if (i >= 0) characterRows[i] = row.copy(name = newName)
+                    },
+                    onAddToGlossaryChange = { addGlossary ->
+                        val i = characterRows.indexOfFirst { it.id == row.id }
+                        if (i >= 0) characterRows[i] = row.copy(addToGlossary = addGlossary)
+                    },
+                    onRemove = {
+                        characterRows.removeAll { it.id == row.id }
+                    },
+                )
+            }
+
+            // Section: Locais
+            item {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Locais (${locationRows.size})",
+                    fontFamily = Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = TextPrimary,
+                )
+                val hasFreeTextLocs = locationRows.any { it.fromFreeText }
+                Text(
+                    text = when {
+                        locationRows.isEmpty() -> "Nenhum local encontrado nas fontes consultadas."
+                        hasFreeTextLocs -> "Itens marcados como texto livre vêm da Open Library e podem conter ruído. Revise antes de salvar."
+                        else -> "Marque os locais que deseja salvar no livro e na série."
+                    },
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+            }
+            items(locationRows, key = { it.id }) { row ->
+                ReviewNamedItemCard(
+                    item = row,
+                    onSelectedChange = { checked ->
+                        val i = locationRows.indexOfFirst { it.id == row.id }
+                        if (i >= 0) {
+                            locationRows[i] = row.copy(
+                                selected = checked,
+                                addToGlossary = if (checked) row.addToGlossary else false,
+                            )
+                        }
+                    },
+                    onNameChange = { newName ->
+                        val i = locationRows.indexOfFirst { it.id == row.id }
+                        if (i >= 0) locationRows[i] = row.copy(name = newName)
+                    },
+                    onAddToGlossaryChange = { addGlossary ->
+                        val i = locationRows.indexOfFirst { it.id == row.id }
+                        if (i >= 0) locationRows[i] = row.copy(addToGlossary = addGlossary)
+                    },
+                    onRemove = {
+                        locationRows.removeAll { it.id == row.id }
+                    },
+                )
             }
         }
 
@@ -707,6 +876,18 @@ private fun LookupReviewStep(
                             .keys
                             .filter { !fieldValues[it].isNullOrBlank() }
                             .toSet()
+                        val confirmedChars = characterRows
+                            .filter { it.selected && it.name.isNotBlank() }
+                            .map { it.toNamedItem() }
+                        val confirmedLocs = locationRows
+                            .filter { it.selected && it.name.isNotBlank() }
+                            .map { it.toNamedItem() }
+                        val glossaryChars = characterRows
+                            .filter { it.selected && it.addToGlossary && it.name.isNotBlank() }
+                            .map { it.toNamedItem() }
+                        val glossaryLocs = locationRows
+                            .filter { it.selected && it.addToGlossary && it.name.isNotBlank() }
+                            .map { it.toNamedItem() }
                         onConfirm(
                             BookMetadataReviewSelection(
                                 values = fieldValues.toMap(),
@@ -718,6 +899,10 @@ private fun LookupReviewStep(
                                 seriesOpenLibraryKey = candidate.seriesOpenLibraryKey,
                                 seriesWikidataQid = candidate.seriesWikidataQid,
                                 seriesHardcoverId = candidate.seriesHardcoverId,
+                                characters = confirmedChars,
+                                locations = confirmedLocs,
+                                charactersForGlossary = glossaryChars,
+                                locationsForGlossary = glossaryLocs,
                             )
                         )
                     },
@@ -729,10 +914,159 @@ private fun LookupReviewStep(
                         .defaultMinSize(minHeight = 48.dp),
                 ) {
                     Text(
-                        text = if (appliedCount > 0) "Confirmar e aplicar ($appliedCount)" else "Marque ao menos 1 campo",
+                        text = if (appliedCount > 0) "Confirmar e aplicar ($appliedCount)" else "Marque ao menos 1 item",
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class EditableNamedItem(
+    val id: String,
+    val name: String,
+    val description: String?,
+    val aliases: List<String>,
+    val source: MetadataSource,
+    val additionalSources: Set<MetadataSource>,
+    val fromFreeText: Boolean,
+    val alreadySaved: Boolean,
+    val selected: Boolean,
+    val addToGlossary: Boolean = false,
+) {
+    fun toNamedItem(): MetadataNamedItem = MetadataNamedItem(
+        name = name.trim(),
+        description = description,
+        aliases = aliases,
+        source = source,
+        additionalSources = additionalSources,
+        fromFreeText = fromFreeText,
+    )
+}
+
+@Composable
+private fun ReviewNamedItemCard(
+    item: EditableNamedItem,
+    onSelectedChange: (Boolean) -> Unit,
+    onNameChange: (String) -> Unit,
+    onAddToGlossaryChange: (Boolean) -> Unit,
+    onRemove: () -> Unit,
+) {
+    val originLabel = formatNamedItemOrigin(item.toNamedItem())
+    M3Surface(
+        color = Surface,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, if (item.selected) Accent.copy(alpha = 0.6f) else Stroke),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clickable(role = Role.Checkbox) { onSelectedChange(!item.selected) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = item.selected,
+                        onCheckedChange = onSelectedChange,
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = Accent,
+                            uncheckedColor = TextSecondary,
+                            checkmarkColor = TextPrimary,
+                        ),
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "Origem: $originLabel" + if (item.alreadySaved) " · Já salvo" else "",
+                            color = if (item.fromFreeText) Accent else TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        if (item.aliases.isNotEmpty()) {
+                            Text(
+                                text = "Também: ${item.aliases.joinToString(", ")}",
+                                color = TextTertiary,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (!item.description.isNullOrBlank()) {
+                            Text(
+                                text = item.description,
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                TextButton(
+                    onClick = onRemove,
+                    colors = ButtonDefaults.textButtonColors(contentColor = Danger),
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                ) {
+                    Text("Remover", fontSize = 12.sp)
+                }
+            }
+
+            OutlinedTextField(
+                value = item.name,
+                onValueChange = onNameChange,
+                label = { Text("Nome") },
+                singleLine = true,
+                colors = lookupFieldColors(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            val canAddToGlossary = item.selected && item.name.isNotBlank()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Field)
+                    .clickable(enabled = canAddToGlossary, role = Role.Checkbox) {
+                        onAddToGlossaryChange(!item.addToGlossary)
+                    }
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = item.addToGlossary && canAddToGlossary,
+                    onCheckedChange = { if (canAddToGlossary) onAddToGlossaryChange(it) },
+                    enabled = canAddToGlossary,
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Positive,
+                        uncheckedColor = TextSecondary,
+                        checkmarkColor = TextPrimary,
+                    ),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "Adicionar ao glossário da série",
+                        color = if (canAddToGlossary) TextPrimary else TextTertiary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = "Usa o nome original como termo; edite a tradução depois.",
+                        color = TextTertiary,
+                        fontSize = 11.sp,
                     )
                 }
             }

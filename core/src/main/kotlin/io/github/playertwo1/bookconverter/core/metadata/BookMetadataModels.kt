@@ -7,8 +7,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
@@ -17,6 +20,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
+import java.text.Normalizer
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -43,6 +47,18 @@ enum class MetadataField(val storageKey: String, val labelPtBr: String) {
   SERIES_SUMMARY("seriesSummary", "Resumo breve da série"),
 }
 
+data class MetadataNamedItem(
+  val name: String,
+  val description: String? = null,
+  val aliases: List<String> = emptyList(),
+  val source: MetadataSource,
+  val additionalSources: Set<MetadataSource> = emptySet(),
+  val fromFreeText: Boolean = (source == MetadataSource.OPEN_LIBRARY),
+) {
+  val allSources: List<MetadataSource>
+    get() = (setOf(source) + additionalSources).sortedBy { it.ordinal }
+}
+
 data class BookMetadataQuery(
   val isbn: String? = null,
   val title: String? = null,
@@ -58,6 +74,7 @@ data class BookMetadataQuery(
 data class SourceBookCandidate(
   val source: MetadataSource,
   val title: String? = null,
+  val alternateTitle: String? = null,
   val author: String? = null,
   val isbn: String? = null,
   val publisher: String? = null,
@@ -73,8 +90,8 @@ data class SourceBookCandidate(
   val seriesOpenLibraryKey: String? = null,
   val seriesWikidataQid: String? = null,
   val seriesHardcoverId: String? = null,
-  val characters: List<String> = emptyList(),
-  val places: List<String> = emptyList(),
+  val characters: List<MetadataNamedItem> = emptyList(),
+  val places: List<MetadataNamedItem> = emptyList(),
 )
 
 sealed interface SourceSearchResult {
@@ -183,6 +200,229 @@ fun parseRetryAfterMillis(headerValue: String?, nowEpochMs: Long = System.curren
 private val HTML_TAG_REGEX = Regex("<[^>]+>")
 private val WHITESPACE_REGEX = Regex("\\s+")
 private val SENTENCE_END_REGEX = Regex("""[.!?](?:\s|$)""")
+private val DIACRITICS_REGEX = Regex("\\p{InCombiningDiacriticalMarks}+")
+private val NON_ENTITY_ALNUM_REGEX = Regex("[^\\p{L}\\p{N}]+")
+private val OL_DOUBLE_DASH_SUFFIX_REGEX = Regex("""\s*--\s*.*$""")
+private val OL_PAREN_NOISE_REGEX = Regex(
+  """\s*\((?:fictitious|fictional|imaginary)\s+[^)]*\)\s*$""",
+  RegexOption.IGNORE_CASE,
+)
+private val OL_DATES_SUFFIX_REGEX = Regex(
+  """,?\s*(?:b\.|d\.|ca\.|fl\.)?\s*\d{3,4}\s*-\s*(?:\d{0,4})?\s*$""",
+  RegexOption.IGNORE_CASE,
+)
+private val OL_GENERIC_NOISE = setOf(
+  "fiction",
+  "juvenile fiction",
+  "science fiction",
+  "fantasy fiction",
+  "fictitious characters",
+  "fictional characters",
+  "imaginary places",
+  "imaginary societies",
+  "stories",
+  "novels",
+)
+private val PERSON_SUFFIX_AFTER_COMMA = setOf(
+  "jr", "sr", "ii", "iii", "iv", "v", "duke", "baron", "lord", "lady", "king", "queen", "emperor", "prince", "princess",
+)
+
+/**
+ * Accent-insensitive and case-insensitive key used to deduplicate characters and places across sources.
+ */
+fun normalizeEntityComparisonKey(raw: String): String {
+  val decomposed = Normalizer.normalize(raw, Normalizer.Form.NFD)
+  return DIACRITICS_REGEX.replace(decomposed, "")
+    .lowercase(Locale.ROOT)
+    .replace(NON_ENTITY_ALNUM_REGEX, " ")
+    .trim()
+}
+
+/**
+ * Cleans noisy Library-of-Congress / Open Library free-text tags (e.g. "Atreides, Paul (Fictitious character)",
+ * "Arrakis (Imaginary place) -- Fiction") into a readable display name, or null if noise/empty.
+ */
+fun normalizeOpenLibraryFreeTextEntity(raw: String, isPerson: Boolean): String? {
+  var value = raw
+    .replace(WHITESPACE_REGEX, " ")
+    .trim()
+    .trim('"', '\'', '[', ']', ';', '.')
+    .trim()
+  if (value.isEmpty()) return null
+
+  value = OL_DOUBLE_DASH_SUFFIX_REGEX.replace(value, "").trim()
+  // Strip trailing catalog parentheticals (may appear more than once in messy records)
+  repeat(2) {
+    value = OL_PAREN_NOISE_REGEX.replace(value, "").trim()
+  }
+  value = OL_DATES_SUFFIX_REGEX.replace(value, "").trim()
+  value = value.trim(',', ';', ':', '.', '"', '\'').replace(WHITESPACE_REGEX, " ").trim()
+
+  if (isPerson && value.contains(',')) {
+    val parts = value.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    if (parts.size == 2) {
+      val firstWordRight = parts[1].substringBefore(' ').trimEnd('.').lowercase(Locale.ROOT)
+      if (firstWordRight !in PERSON_SUFFIX_AFTER_COMMA && !parts[0].contains(' ')) {
+        value = "${parts[1]} ${parts[0]}".replace(WHITESPACE_REGEX, " ").trim()
+      }
+    }
+  }
+
+  val key = normalizeEntityComparisonKey(value)
+  if (key.length < 2 || key.all { it.isDigit() || it == ' ' } || key in OL_GENERIC_NOISE) {
+    return null
+  }
+  return value
+}
+
+private val NAMED_ITEM_SOURCE_PRIORITY = listOf(
+  MetadataSource.WIKIDATA,
+  MetadataSource.HARDCOVER,
+  MetadataSource.OPEN_LIBRARY,
+)
+
+/**
+ * Merges and deduplicates characters or locations across sources (accent-insensitive and case-insensitive).
+ * Structured sources (Wikidata, Hardcover) take precedence over free-text Open Library entries while
+ * preserving provenance from every contributing source.
+ */
+fun mergeNamedItems(
+  existing: List<MetadataNamedItem>,
+  incoming: List<MetadataNamedItem>,
+): List<MetadataNamedItem> {
+  val merged = linkedMapOf<String, MetadataNamedItem>()
+
+  fun upsert(item: MetadataNamedItem, preserveExistingName: Boolean) {
+    val cleanName = item.name.replace(WHITESPACE_REGEX, " ").trim()
+    if (cleanName.isEmpty()) return
+    val key = normalizeEntityComparisonKey(cleanName)
+    if (key.isEmpty()) return
+    val cleanDesc = trimToBriefSummary(item.description, maxChars = 160)
+    val cleanAliases = item.aliases
+      .map { it.replace(WHITESPACE_REGEX, " ").trim() }
+      .filter { it.isNotEmpty() && normalizeEntityComparisonKey(it) != key }
+      .distinctBy { normalizeEntityComparisonKey(it) }
+      .take(4)
+
+    val normalizedItem = item.copy(
+      name = cleanName,
+      description = cleanDesc,
+      aliases = cleanAliases,
+    )
+
+    val prev = merged[key]
+    if (prev == null) {
+      merged[key] = normalizedItem
+      return
+    }
+
+    val prevRank = NAMED_ITEM_SOURCE_PRIORITY.indexOf(prev.source).let { if (it == -1) Int.MAX_VALUE else it }
+    val newRank = NAMED_ITEM_SOURCE_PRIORITY.indexOf(normalizedItem.source).let { if (it == -1) Int.MAX_VALUE else it }
+    val incomingWinsSource = newRank < prevRank
+
+    val primarySource = if (incomingWinsSource) normalizedItem.source else prev.source
+    val allSources = (setOf(prev.source) + prev.additionalSources + setOf(normalizedItem.source) + normalizedItem.additionalSources) - primarySource
+    val chosenName = when {
+      preserveExistingName -> prev.name
+      incomingWinsSource -> normalizedItem.name
+      else -> prev.name
+    }
+    val chosenDesc = when {
+      incomingWinsSource && normalizedItem.description != null -> normalizedItem.description
+      prev.description != null -> prev.description
+      else -> normalizedItem.description
+    }
+    val combinedAliases = (prev.aliases + normalizedItem.aliases)
+      .filter { normalizeEntityComparisonKey(it) != normalizeEntityComparisonKey(chosenName) }
+      .distinctBy { normalizeEntityComparisonKey(it) }
+      .take(4)
+    val onlyFreeText = (setOf(primarySource) + allSources).all { it == MetadataSource.OPEN_LIBRARY } &&
+      (prev.fromFreeText && normalizedItem.fromFreeText)
+
+    merged[key] = MetadataNamedItem(
+      name = chosenName,
+      description = chosenDesc,
+      aliases = combinedAliases,
+      source = primarySource,
+      additionalSources = allSources,
+      fromFreeText = onlyFreeText,
+    )
+  }
+
+  existing.forEach { upsert(it, preserveExistingName = true) }
+  // Sort incoming so structured sources land first in deterministic order
+  val sortedIncoming = incoming.sortedBy {
+    NAMED_ITEM_SOURCE_PRIORITY.indexOf(it.source).let { idx -> if (idx == -1) Int.MAX_VALUE else idx }
+  }
+  sortedIncoming.forEach { upsert(it, preserveExistingName = existing.isNotEmpty() && normalizeEntityComparisonKey(it.name) in merged) }
+  return merged.values.toList()
+}
+
+fun serializeNamedItems(items: List<MetadataNamedItem>): String? {
+  if (items.isEmpty()) return null
+  val arr = buildJsonArray {
+    items.forEach { item ->
+      add(
+        buildJsonObject {
+          put("name", JsonPrimitive(item.name))
+          item.description?.takeIf { it.isNotBlank() }?.let { put("description", JsonPrimitive(it)) }
+          if (item.aliases.isNotEmpty()) {
+            put(
+              "aliases",
+              buildJsonArray { item.aliases.forEach { add(JsonPrimitive(it)) } },
+            )
+          }
+          put("source", JsonPrimitive(item.source.name))
+          if (item.additionalSources.isNotEmpty()) {
+            put(
+              "additionalSources",
+              buildJsonArray {
+                item.additionalSources.sortedBy { it.ordinal }.forEach { add(JsonPrimitive(it.name)) }
+              },
+            )
+          }
+          put("fromFreeText", JsonPrimitive(item.fromFreeText))
+        }
+      )
+    }
+  }
+  return arr.toString()
+}
+
+fun parseNamedItems(jsonText: String?): List<MetadataNamedItem> {
+  if (jsonText.isNullOrBlank()) return emptyList()
+  val arr = runCatching { Json.parseToJsonElement(jsonText).jsonArray }.getOrNull() ?: return emptyList()
+  return arr.mapNotNull { el ->
+    val obj = runCatching { el.jsonObject }.getOrNull() ?: return@mapNotNull null
+    val name = runCatching { obj["name"]?.jsonPrimitive?.contentOrNull?.trim() }.getOrNull()
+      ?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+    val description = runCatching { obj["description"]?.jsonPrimitive?.contentOrNull?.trim() }.getOrNull()
+      ?.takeIf { it.isNotEmpty() }
+    val aliases = obj["aliases"]?.asJsonArrayOrNull()
+      ?.mapNotNull { runCatching { it.jsonPrimitive.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }.getOrNull() }
+      ?: emptyList()
+    val sourceName = runCatching { obj["source"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+    val source = MetadataSource.entries.firstOrNull { it.name == sourceName } ?: return@mapNotNull null
+    val additionalSources = obj["additionalSources"]?.asJsonArrayOrNull()
+      ?.mapNotNull { elSrc ->
+        val n = runCatching { elSrc.jsonPrimitive.contentOrNull }.getOrNull()
+        MetadataSource.entries.firstOrNull { it.name == n }
+      }
+      ?.filter { it != source }
+      ?.toSet()
+      ?: emptySet()
+    val fromFreeText = runCatching { obj["fromFreeText"]?.jsonPrimitive?.booleanOrNull }.getOrNull()
+      ?: (source == MetadataSource.OPEN_LIBRARY && additionalSources.isEmpty())
+    MetadataNamedItem(
+      name = name,
+      description = description,
+      aliases = aliases,
+      source = source,
+      additionalSources = additionalSources,
+      fromFreeText = fromFreeText,
+    )
+  }
+}
 
 /**
  * Normalizes and trims a source synopsis into a clean brief summary up to [maxChars] characters

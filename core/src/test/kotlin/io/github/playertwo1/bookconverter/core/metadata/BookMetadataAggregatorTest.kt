@@ -17,7 +17,7 @@ class BookMetadataAggregatorTest {
   }
 
   @Test
-  fun mergesSourcesPrioritizesWikidataHardcoverForPositionAndExposesConflicts() = runBlocking {
+  fun mergesSourcesPrioritizesWikidataHardcoverForPositionAndDeduplicatesCharactersAndPlaces() = runBlocking {
     val ol = SourceBookCandidate(
       source = MetadataSource.OPEN_LIBRARY,
       title = "Dune",
@@ -29,7 +29,15 @@ class BookMetadataAggregatorTest {
       summary = "Set on the desert planet Arrakis, Dune tells the story of Paul Atreides, heir to a noble family tasked with ruling an inhospitable world.",
       seriesPosition = "99", // Even if injected, Open Library must never be trusted for series position
       openLibraryKey = "/works/OL893415W",
-      characters = listOf("Paul Atreides"),
+      characters = listOf(
+        MetadataNamedItem(name = "paul atreides", source = MetadataSource.OPEN_LIBRARY, fromFreeText = true),
+        MetadataNamedItem(name = "Lady Jéssica", source = MetadataSource.OPEN_LIBRARY, fromFreeText = true),
+        MetadataNamedItem(name = "Duncan Idaho", source = MetadataSource.OPEN_LIBRARY, fromFreeText = true),
+      ),
+      places = listOf(
+        MetadataNamedItem(name = "Árrakis", source = MetadataSource.OPEN_LIBRARY, fromFreeText = true),
+        MetadataNamedItem(name = "Giedi Prime", source = MetadataSource.OPEN_LIBRARY, fromFreeText = true),
+      ),
     )
     val wd = SourceBookCandidate(
       source = MetadataSource.WIKIDATA,
@@ -46,7 +54,30 @@ class BookMetadataAggregatorTest {
       openLibraryKey = "/works/OL893415W",
       wikidataQid = "Q190192",
       seriesWikidataQid = "Q837705",
-      places = listOf("Arrakis"),
+      characters = listOf(
+        MetadataNamedItem(
+          name = "Paul Atreides",
+          description = "Protagonista da série Duna.",
+          aliases = listOf("Muad'Dib"),
+          source = MetadataSource.WIKIDATA,
+          fromFreeText = false,
+        ),
+        MetadataNamedItem(
+          name = "Lady Jessica",
+          description = "Concubina Bene Gesserit.",
+          source = MetadataSource.WIKIDATA,
+          fromFreeText = false,
+        ),
+      ),
+      places = listOf(
+        MetadataNamedItem(
+          name = "Arrakis",
+          description = "Planeta desértico fictício.",
+          aliases = listOf("Duna"),
+          source = MetadataSource.WIKIDATA,
+          fromFreeText = false,
+        ),
+      ),
     )
     val hc = SourceBookCandidate(
       source = MetadataSource.HARDCOVER,
@@ -62,6 +93,20 @@ class BookMetadataAggregatorTest {
       seriesSummary = "Epic science fiction saga spanning thousands of years on Arrakis.",
       hardcoverId = "1001",
       seriesHardcoverId = "55",
+      characters = listOf(
+        MetadataNamedItem(
+          name = "PAUL ATREIDES",
+          description = "Heir to House Atreides.",
+          source = MetadataSource.HARDCOVER,
+          fromFreeText = false,
+        ),
+        MetadataNamedItem(
+          name = "Chani",
+          description = "Fremen warrior.",
+          source = MetadataSource.HARDCOVER,
+          fromFreeText = false,
+        ),
+      ),
     )
 
     val aggregator = BookMetadataAggregator(
@@ -104,6 +149,96 @@ class BookMetadataAggregatorTest {
     val summaryProposal = merged.fields[MetadataField.SUMMARY]!!
     assertEquals(MetadataSource.HARDCOVER, summaryProposal.selectedSource)
     assertTrue(summaryProposal.selectedValue.length <= 400)
+
+    // Characters deduplicated accent- and case-insensitively across all 3 sources
+    assertEquals(listOf("Paul Atreides", "Lady Jessica", "Chani", "Duncan Idaho"), merged.characters.map { it.name })
+    val paul = merged.characters[0]
+    assertEquals(MetadataSource.WIKIDATA, paul.source)
+    assertEquals(setOf(MetadataSource.HARDCOVER, MetadataSource.OPEN_LIBRARY), paul.additionalSources)
+    assertFalse(paul.fromFreeText)
+    assertEquals(listOf("Muad'Dib"), paul.aliases)
+
+    val jessica = merged.characters[1]
+    assertEquals(MetadataSource.WIKIDATA, jessica.source)
+    assertEquals(setOf(MetadataSource.OPEN_LIBRARY), jessica.additionalSources)
+    assertFalse(jessica.fromFreeText)
+
+    val chani = merged.characters[2]
+    assertEquals(MetadataSource.HARDCOVER, chani.source)
+    assertFalse(chani.fromFreeText)
+
+    val duncan = merged.characters[3]
+    assertEquals(MetadataSource.OPEN_LIBRARY, duncan.source)
+    assertTrue("Open Library-only item must stay marked as free text", duncan.fromFreeText)
+
+    // Places deduplicated accent-insensitively ("Árrakis" vs "Arrakis")
+    assertEquals(listOf("Arrakis", "Giedi Prime"), merged.places.map { it.name })
+    assertEquals(MetadataSource.WIKIDATA, merged.places[0].source)
+    assertEquals(setOf(MetadataSource.OPEN_LIBRARY), merged.places[0].additionalSources)
+    assertFalse(merged.places[0].fromFreeText)
+    assertEquals(MetadataSource.OPEN_LIBRARY, merged.places[1].source)
+    assertTrue(merged.places[1].fromFreeText)
+  }
+
+  @Test
+  fun openLibraryFreeTextNormalizerCleansNoisyCatalogEntries() {
+    assertEquals("Paul Atreides", normalizeOpenLibraryFreeTextEntity("Atreides, Paul (Fictitious character)", isPerson = true))
+    assertEquals("Lady Jessica", normalizeOpenLibraryFreeTextEntity("  Lady Jessica -- Juvenile fiction ", isPerson = true))
+    assertEquals("Arrakis", normalizeOpenLibraryFreeTextEntity("Arrakis (Imaginary place) -- Fiction", isPerson = false))
+    assertEquals("Frank Herbert", normalizeOpenLibraryFreeTextEntity("Herbert, Frank, 1920-1986", isPerson = true))
+    assertNull(normalizeOpenLibraryFreeTextEntity("Fictitious characters", isPerson = true))
+    assertNull(normalizeOpenLibraryFreeTextEntity("Imaginary places", isPerson = false))
+    assertNull(normalizeOpenLibraryFreeTextEntity("1965", isPerson = false))
+  }
+
+  @Test
+  fun namedItemsRoundTripSerialization() {
+    val items = listOf(
+      MetadataNamedItem(
+        name = "Paul Atreides",
+        description = "Protagonista",
+        aliases = listOf("Muad'Dib"),
+        source = MetadataSource.WIKIDATA,
+        additionalSources = setOf(MetadataSource.HARDCOVER),
+        fromFreeText = false,
+      ),
+      MetadataNamedItem(
+        name = "Duncan Idaho",
+        source = MetadataSource.OPEN_LIBRARY,
+        fromFreeText = true,
+      ),
+    )
+    val json = serializeNamedItems(items)
+    assertEquals(items, parseNamedItems(json))
+    assertNull(serializeNamedItems(emptyList()))
+    assertTrue(parseNamedItems("not-json").isEmpty())
+  }
+
+  @Test
+  fun matchesPortugueseAndEnglishLabelsViaAlternateTitleAndDoesNotMergeAuthorlessNonBook() {
+    val ol = SourceBookCandidate(
+      source = MetadataSource.OPEN_LIBRARY,
+      title = "Dune",
+      author = "Frank Herbert",
+      openLibraryKey = "/works/OL893415W",
+    )
+    val wdBook = SourceBookCandidate(
+      source = MetadataSource.WIKIDATA,
+      title = "Duna",
+      alternateTitle = "Dune",
+      author = "Frank Herbert",
+      wikidataQid = "Q190192",
+    )
+    val wdAuthorless = SourceBookCandidate(
+      source = MetadataSource.WIKIDATA,
+      title = "Dune",
+      author = null,
+      wikidataQid = "Q999999",
+    )
+    val merged = BookMetadataAggregator.mergeCandidates(listOf(ol, wdBook, wdAuthorless))
+    assertEquals(2, merged.size)
+    val bookCand = merged.first { it.wikidataQid == "Q190192" }
+    assertEquals(setOf(MetadataSource.OPEN_LIBRARY, MetadataSource.WIKIDATA), bookCand.sources)
   }
 
   @Test

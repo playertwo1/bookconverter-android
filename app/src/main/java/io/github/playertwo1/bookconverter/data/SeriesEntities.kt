@@ -27,6 +27,8 @@ data class Series(
     val wikidataQid: String? = null,
     val hardcoverId: String? = null,
     val metadataSourcesJson: String? = null,
+    val charactersJson: String? = null,
+    val locationsJson: String? = null,
 )
 
 private val PARENTHETICAL_VOLUME_SUFFIX = Regex(

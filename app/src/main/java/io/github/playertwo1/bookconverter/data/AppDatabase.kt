@@ -37,6 +37,8 @@ data class Book(
     val wikidataQid: String? = null,
     val hardcoverId: String? = null,
     val metadataSourcesJson: String? = null,
+    val charactersJson: String? = null,
+    val locationsJson: String? = null,
 )
 
 @Dao
@@ -233,12 +235,16 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `Book` ADD COLUMN `wikidataQid` TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE `Book` ADD COLUMN `hardcoverId` TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE `Book` ADD COLUMN `metadataSourcesJson` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `charactersJson` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Book` ADD COLUMN `locationsJson` TEXT DEFAULT NULL")
 
                 db.execSQL("ALTER TABLE `Series` ADD COLUMN `summary` TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE `Series` ADD COLUMN `openLibraryKey` TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE `Series` ADD COLUMN `wikidataQid` TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE `Series` ADD COLUMN `hardcoverId` TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE `Series` ADD COLUMN `metadataSourcesJson` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Series` ADD COLUMN `charactersJson` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `Series` ADD COLUMN `locationsJson` TEXT DEFAULT NULL")
             }
         }
 

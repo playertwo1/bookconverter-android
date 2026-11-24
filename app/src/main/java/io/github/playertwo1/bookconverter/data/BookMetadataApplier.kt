@@ -2,16 +2,21 @@ package io.github.playertwo1.bookconverter.data
 
 import io.github.playertwo1.bookconverter.core.metadata.AggregatedBookCandidate
 import io.github.playertwo1.bookconverter.core.metadata.MetadataField
+import io.github.playertwo1.bookconverter.core.metadata.MetadataNamedItem
 import io.github.playertwo1.bookconverter.core.metadata.MetadataSource
+import io.github.playertwo1.bookconverter.core.metadata.mergeNamedItems
+import io.github.playertwo1.bookconverter.core.metadata.normalizeEntityComparisonKey
 import io.github.playertwo1.bookconverter.core.metadata.normalizeIsbn
 import io.github.playertwo1.bookconverter.core.metadata.normalizeSeriesPosition
 import io.github.playertwo1.bookconverter.core.metadata.parseMetadataSources
+import io.github.playertwo1.bookconverter.core.metadata.parseNamedItems
 import io.github.playertwo1.bookconverter.core.metadata.serializeMetadataSources
+import io.github.playertwo1.bookconverter.core.metadata.serializeNamedItems
 import io.github.playertwo1.bookconverter.core.metadata.trimToBriefSummary
 
 /**
  * Confirmed metadata edits from the review screen. Only fields present in [appliedFields]
- * are written to the Book or Series; unchecked fields keep their existing values untouched.
+ * and explicitly checked [characters]/[locations] are written; unchecked fields keep existing values.
  */
 data class BookMetadataReviewSelection(
     val values: Map<MetadataField, String>,
@@ -23,6 +28,10 @@ data class BookMetadataReviewSelection(
     val seriesOpenLibraryKey: String? = null,
     val seriesWikidataQid: String? = null,
     val seriesHardcoverId: String? = null,
+    val characters: List<MetadataNamedItem> = emptyList(),
+    val locations: List<MetadataNamedItem> = emptyList(),
+    val charactersForGlossary: List<MetadataNamedItem> = emptyList(),
+    val locationsForGlossary: List<MetadataNamedItem> = emptyList(),
 ) {
     fun appliedValue(field: MetadataField): String? {
         if (field !in appliedFields) return null
@@ -34,6 +43,11 @@ data class BookMetadataReviewSelection(
             else -> raw
         }
     }
+
+    val allContributingSources: List<MetadataSource>
+        get() = (sources.values + characters.flatMap { it.allSources } + locations.flatMap { it.allSources })
+            .distinct()
+            .sortedBy { it.ordinal }
 }
 
 private val BOOK_FIELDS = setOf(
@@ -103,7 +117,20 @@ fun applyMetadataToBook(
             selection.sources[field]?.let { mergedSources[field] = it }
         }
     }
-    val hasAnyBookUpdate = appliedBookFields.any { selection.appliedValue(it) != null }
+    val mergedCharacters = if (selection.characters.isNotEmpty()) {
+        serializeNamedItems(mergeNamedItems(parseNamedItems(existing.charactersJson), selection.characters))
+    } else {
+        existing.charactersJson
+    }
+    val mergedLocations = if (selection.locations.isNotEmpty()) {
+        serializeNamedItems(mergeNamedItems(parseNamedItems(existing.locationsJson), selection.locations))
+    } else {
+        existing.locationsJson
+    }
+    val hasAnyBookUpdate = appliedBookFields.any { selection.appliedValue(it) != null } ||
+        selection.characters.isNotEmpty() ||
+        selection.locations.isNotEmpty()
+
     return existing.copy(
         title = selection.appliedValue(MetadataField.TITLE) ?: existing.title,
         author = selection.appliedValue(MetadataField.AUTHOR) ?: existing.author,
@@ -118,6 +145,8 @@ fun applyMetadataToBook(
         wikidataQid = if (hasAnyBookUpdate) (selection.wikidataQid ?: existing.wikidataQid) else existing.wikidataQid,
         hardcoverId = if (hasAnyBookUpdate) (selection.hardcoverId ?: existing.hardcoverId) else existing.hardcoverId,
         metadataSourcesJson = serializeMetadataSources(mergedSources),
+        charactersJson = mergedCharacters,
+        locationsJson = mergedLocations,
     )
 }
 
@@ -133,7 +162,20 @@ fun applyMetadataToSeries(
             selection.sources[field]?.let { mergedSources[field] = it }
         }
     }
-    val hasAnySeriesUpdate = appliedSeriesFields.any { selection.appliedValue(it) != null }
+    val mergedCharacters = if (selection.characters.isNotEmpty()) {
+        serializeNamedItems(mergeNamedItems(parseNamedItems(existing.charactersJson), selection.characters))
+    } else {
+        existing.charactersJson
+    }
+    val mergedLocations = if (selection.locations.isNotEmpty()) {
+        serializeNamedItems(mergeNamedItems(parseNamedItems(existing.locationsJson), selection.locations))
+    } else {
+        existing.locationsJson
+    }
+    val hasAnySeriesUpdate = appliedSeriesFields.any { selection.appliedValue(it) != null } ||
+        selection.characters.isNotEmpty() ||
+        selection.locations.isNotEmpty()
+
     return existing.copy(
         name = selection.appliedValue(MetadataField.SERIES_NAME) ?: existing.name,
         author = selection.appliedValue(MetadataField.AUTHOR) ?: existing.author,
@@ -142,12 +184,69 @@ fun applyMetadataToSeries(
         wikidataQid = if (hasAnySeriesUpdate) (selection.seriesWikidataQid ?: existing.wikidataQid) else existing.wikidataQid,
         hardcoverId = if (hasAnySeriesUpdate) (selection.seriesHardcoverId ?: existing.hardcoverId) else existing.hardcoverId,
         metadataSourcesJson = serializeMetadataSources(mergedSources),
+        charactersJson = mergedCharacters,
+        locationsJson = mergedLocations,
         updatedAt = now,
     )
 }
 
-fun formatSourceAttribution(metadataSourcesJson: String?): String? {
-    val sources = parseMetadataSources(metadataSourcesJson).values.distinct()
+/**
+ * Builds new [GlossaryEntry] rows for characters/locations where the user explicitly enabled
+ * "Adicionar ao glossário da série". Uses the original name for both sourceTerm and targetTerm
+ * (proper nouns usually remain identical and the user can edit the translation later).
+ * Never overwrites terms already present in [existingGlossary].
+ */
+fun buildNewGlossaryEntries(
+    seriesId: Long,
+    existingGlossary: List<GlossaryEntry>,
+    charactersForGlossary: List<MetadataNamedItem>,
+    locationsForGlossary: List<MetadataNamedItem>,
+    now: Long,
+): List<GlossaryEntry> {
+    if (charactersForGlossary.isEmpty() && locationsForGlossary.isEmpty()) return emptyList()
+    val existingKeys = existingGlossary
+        .map { normalizeEntityComparisonKey(it.sourceTerm) }
+        .toMutableSet()
+    val out = mutableListOf<GlossaryEntry>()
+
+    fun addItem(item: MetadataNamedItem, kindLabel: String) {
+        val cleanName = item.name.trim()
+        if (cleanName.isEmpty()) return
+        val key = normalizeEntityComparisonKey(cleanName)
+        if (key.isEmpty() || !existingKeys.add(key)) return
+        val origin = formatNamedItemOrigin(item)
+        val note = listOfNotNull(
+            "$kindLabel ($origin)",
+            item.description?.takeIf { it.isNotBlank() },
+        ).joinToString(": ").take(180)
+        out += GlossaryEntry(
+            seriesId = seriesId,
+            sourceTerm = cleanName,
+            targetTerm = cleanName,
+            notes = note,
+            updatedAt = now,
+        )
+    }
+
+    charactersForGlossary.forEach { addItem(it, "Personagem") }
+    locationsForGlossary.forEach { addItem(it, "Local") }
+    return out
+}
+
+fun formatNamedItemOrigin(item: MetadataNamedItem): String {
+    val names = item.allSources.joinToString(", ") { it.displayName }
+    return if (item.fromFreeText) "$names, texto livre" else names
+}
+
+fun formatSourceAttribution(
+    metadataSourcesJson: String?,
+    charactersJson: String? = null,
+    locationsJson: String? = null,
+): String? {
+    val fieldSources = parseMetadataSources(metadataSourcesJson).values
+    val charSources = parseNamedItems(charactersJson).flatMap { it.allSources }
+    val locSources = parseNamedItems(locationsJson).flatMap { it.allSources }
+    val sources = (fieldSources + charSources + locSources).distinct()
     if (sources.isEmpty()) return null
     val names = sources.sortedBy { it.ordinal }.joinToString(", ") { it.displayName }
     return "Fontes: $names"

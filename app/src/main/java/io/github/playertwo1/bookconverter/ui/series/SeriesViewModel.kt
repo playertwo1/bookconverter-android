@@ -32,6 +32,7 @@ import io.github.playertwo1.bookconverter.data.SeriesMemoryEntry
 import io.github.playertwo1.bookconverter.data.SeriesSummary
 import io.github.playertwo1.bookconverter.data.applyMetadataToBook
 import io.github.playertwo1.bookconverter.data.applyMetadataToSeries
+import io.github.playertwo1.bookconverter.data.buildNewGlossaryEntries
 import io.github.playertwo1.bookconverter.data.label
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -179,8 +180,26 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
                         bookDao.setSeries(linkBookId, id)
                     }
                 }
+                var addedGlossaryCount = 0
+                if (metadataSelection != null) {
+                    val newGlossary = buildNewGlossaryEntries(
+                        seriesId = id,
+                        existingGlossary = emptyList(),
+                        charactersForGlossary = metadataSelection.charactersForGlossary,
+                        locationsForGlossary = metadataSelection.locationsForGlossary,
+                        now = now,
+                    )
+                    if (newGlossary.isNotEmpty()) {
+                        seriesDao.importGlossaryEntriesAndBump(id, newGlossary, now)
+                        addedGlossaryCount = newGlossary.size
+                    }
+                }
                 _selectedSeriesId.value = id
-                _message.value = "Série \"$trimmedName\" criada."
+                _message.value = if (addedGlossaryCount > 0) {
+                    "Série \"$trimmedName\" criada · $addedGlossaryCount termo(s) no glossário."
+                } else {
+                    "Série \"$trimmedName\" criada."
+                }
                 onCreated(id)
             } catch (e: Exception) {
                 _message.value = "Erro ao criar série: ${e.message ?: e.javaClass.simpleName}"
@@ -265,6 +284,7 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val now = System.currentTimeMillis()
+                var addedGlossaryCount = 0
                 withContext(Dispatchers.IO) {
                     val currentSeries = seriesDao.byId(seriesId)
                     if (currentSeries != null) {
@@ -276,8 +296,24 @@ class SeriesViewModel(app: Application) : AndroidViewModel(app) {
                             bookDao.updateBook(applyMetadataToBook(currentBook, selection, targetSeriesId = seriesId))
                         }
                     }
+                    val existingGlossary = seriesDao.glossaryForSeries(seriesId)
+                    val newGlossary = buildNewGlossaryEntries(
+                        seriesId = seriesId,
+                        existingGlossary = existingGlossary,
+                        charactersForGlossary = selection.charactersForGlossary,
+                        locationsForGlossary = selection.locationsForGlossary,
+                        now = now,
+                    )
+                    if (newGlossary.isNotEmpty()) {
+                        seriesDao.importGlossaryEntriesAndBump(seriesId, newGlossary, now)
+                        addedGlossaryCount = newGlossary.size
+                    }
                 }
-                _message.value = "Informações salvas."
+                _message.value = if (addedGlossaryCount > 0) {
+                    "Informações salvas · $addedGlossaryCount termo(s) no glossário."
+                } else {
+                    "Informações salvas."
+                }
             } catch (e: Exception) {
                 _message.value = "Erro ao salvar informações: ${e.message ?: e.javaClass.simpleName}"
             }

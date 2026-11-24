@@ -62,6 +62,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.playertwo1.bookconverter.core.metadata.MetadataField
+import io.github.playertwo1.bookconverter.core.metadata.MetadataNamedItem
+import io.github.playertwo1.bookconverter.core.metadata.parseNamedItems
 import io.github.playertwo1.bookconverter.data.Book
 import io.github.playertwo1.bookconverter.data.BookMetadataReviewSelection
 import io.github.playertwo1.bookconverter.data.GlossaryEntry
@@ -70,6 +72,7 @@ import io.github.playertwo1.bookconverter.data.MemoryStatus
 import io.github.playertwo1.bookconverter.data.Series
 import io.github.playertwo1.bookconverter.data.SeriesMemoryEntry
 import io.github.playertwo1.bookconverter.data.SeriesSummary
+import io.github.playertwo1.bookconverter.data.formatNamedItemOrigin
 import io.github.playertwo1.bookconverter.data.formatSourceAttribution
 import io.github.playertwo1.bookconverter.data.suggestSeriesName
 import io.github.playertwo1.bookconverter.ui.sizeLabel
@@ -505,6 +508,8 @@ private fun SeriesDetailScreen(
                     .thenBy { it.title.lowercase() }
             )
     }
+    val seriesCharacters = remember(series.charactersJson) { parseNamedItems(series.charactersJson) }
+    val seriesLocations = remember(series.locationsJson) { parseNamedItems(series.locationsJson) }
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -583,9 +588,13 @@ private fun SeriesDetailScreen(
             }
         }
 
-        // Resumo breve da série e atribuição (quando salvo)
-        val seriesAttribution = formatSourceAttribution(series.metadataSourcesJson)
-        if (!series.summary.isNullOrBlank() || seriesAttribution != null) {
+        // Resumo breve, personagens, locais e atribuição da série (quando salvos)
+        val seriesAttribution = formatSourceAttribution(
+            metadataSourcesJson = series.metadataSourcesJson,
+            charactersJson = series.charactersJson,
+            locationsJson = series.locationsJson,
+        )
+        if (!series.summary.isNullOrBlank() || seriesCharacters.isNotEmpty() || seriesLocations.isNotEmpty() || seriesAttribution != null) {
             item {
                 M3Surface(
                     modifier = Modifier
@@ -611,12 +620,24 @@ private fun SeriesDetailScreen(
                                 modifier = Modifier.padding(top = 6.dp),
                             )
                         }
+                        if (seriesCharacters.isNotEmpty()) {
+                            SavedNamedItemsBlock(
+                                title = "Personagens (${seriesCharacters.size})",
+                                items = seriesCharacters,
+                            )
+                        }
+                        if (seriesLocations.isNotEmpty()) {
+                            SavedNamedItemsBlock(
+                                title = "Locais (${seriesLocations.size})",
+                                items = seriesLocations,
+                            )
+                        }
                         if (seriesAttribution != null) {
                             Text(
                                 text = seriesAttribution,
                                 color = TextTertiary,
                                 fontSize = 11.sp,
-                                modifier = Modifier.padding(top = 6.dp),
+                                modifier = Modifier.padding(top = 8.dp),
                             )
                         }
                     }
@@ -741,7 +762,13 @@ private fun SeriesDetailScreen(
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             linkedBooks.forEach { book ->
-                                val bookAttr = formatSourceAttribution(book.metadataSourcesJson)
+                                val bookCharacters = parseNamedItems(book.charactersJson)
+                                val bookLocations = parseNamedItems(book.locationsJson)
+                                val bookAttr = formatSourceAttribution(
+                                    metadataSourcesJson = book.metadataSourcesJson,
+                                    charactersJson = book.charactersJson,
+                                    locationsJson = book.locationsJson,
+                                )
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -794,6 +821,26 @@ private fun SeriesDetailScreen(
                                             maxLines = 3,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.padding(top = 6.dp),
+                                        )
+                                    }
+                                    if (bookCharacters.isNotEmpty()) {
+                                        Text(
+                                            text = "Personagens: ${bookCharacters.joinToString(", ") { it.name }}",
+                                            color = TextSecondary,
+                                            fontSize = 11.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(top = 4.dp),
+                                        )
+                                    }
+                                    if (bookLocations.isNotEmpty()) {
+                                        Text(
+                                            text = "Locais: ${bookLocations.joinToString(", ") { it.name }}",
+                                            color = TextSecondary,
+                                            fontSize = 11.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(top = 2.dp),
                                         )
                                     }
                                     if (bookAttr != null) {
@@ -1626,13 +1673,19 @@ private fun CreateSeriesDialog(
                     Text("Buscar informações do livro", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
                 if (pendingSelection != null) {
-                    val sourcesLine = pendingSelection!!.sources.values
-                        .distinct()
-                        .sortedBy { it.ordinal }
-                        .joinToString(", ") { it.displayName }
+                    val sel = pendingSelection!!
+                    val sourcesLine = sel.allContributingSources.joinToString(", ") { it.displayName }
+                    val extras = listOfNotNull(
+                        sel.characters.size.takeIf { it > 0 }?.let { "$it pers." },
+                        sel.locations.size.takeIf { it > 0 }?.let { "$it locais" },
+                    ).joinToString(", ")
+                    val suffix = listOfNotNull(
+                        sourcesLine.takeIf { it.isNotEmpty() },
+                        extras.takeIf { it.isNotEmpty() },
+                    ).joinToString(" · ")
                     Text(
-                        text = if (sourcesLine.isNotEmpty()) {
-                            "Dados prontos para aplicar ao criar ($sourcesLine)."
+                        text = if (suffix.isNotEmpty()) {
+                            "Dados prontos para aplicar ao criar ($suffix)."
                         } else {
                             "Dados prontos para aplicar ao criar."
                         },
@@ -2391,6 +2444,58 @@ private fun seriesFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedContainerColor = Field,
     cursorColor = Accent,
 )
+
+@Composable
+private fun SavedNamedItemsBlock(
+    title: String,
+    items: List<MetadataNamedItem>,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = title,
+            color = TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        items.forEach { item ->
+            val origin = formatNamedItemOrigin(item)
+            val aliasPart = item.aliases.takeIf { it.isNotEmpty() }?.joinToString(", ")
+            val detail = listOfNotNull(
+                aliasPart?.let { "também: $it" },
+                item.description?.takeIf { it.isNotBlank() },
+            ).joinToString(" · ")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Field)
+                    .border(1.dp, Stroke, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = "${item.name} ($origin)",
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                if (detail.isNotEmpty()) {
+                    Text(
+                        text = detail,
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
 
 private fun sanitizeFileName(name: String): String {
     val clean = name.replace(Regex("[^a-zA-Z0-9._-]"), "_").trim('_')

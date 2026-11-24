@@ -5,6 +5,18 @@
     "type": "/type/text",
     "value": "Set on the desert planet Arrakis, Dune is the story of the boy Paul Atreides, heir to a noble family tasked with ruling an inhospitable world where the only thing of value is the spice melange. Political betrayal forces Paul into the deep desert among the Fremen. There he must survive and fulfill an ancient destiny across the galaxy. Extra trailing detail beyond four hundred characters to verify clean sentence trimming works properly without cutting mid-word or calling any external AI provider."
   },
-  "subject_people": ["Paul Atreides", "Lady Jessica"],
-  "subject_places": ["Arrakis"]
+  "subject_people": [
+    "Atreides, Paul (Fictitious character)",
+    "Paul Atreides",
+    "Lady Jéssica -- Fiction",
+    "lady jessica",
+    "Duncan Idaho (Fictional character)",
+    "Fictitious characters"
+  ],
+  "subject_places": [
+    "Arrakis (Imaginary place)",
+    "arrakis -- Fiction",
+    "Caladan (Imaginary place)",
+    "Imaginary places"
+  ]
 }

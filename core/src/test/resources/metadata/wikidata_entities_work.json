@@ -1,0 +1,53 @@
+{
+  "entities": {
+    "Q190192": {
+      "id": "Q190192",
+      "labels": {
+        "pt": { "language": "pt", "value": "Dune" },
+        "en": { "language": "en", "value": "Dune" }
+      },
+      "descriptions": {
+        "pt": { "language": "pt", "value": "Romance de ficção científica de Frank Herbert." },
+        "en": { "language": "en", "value": "1965 science fiction novel by Frank Herbert." }
+      },
+      "claims": {
+        "P50": [
+          { "mainsnak": { "datavalue": { "value": { "id": "Q181557" } } } }
+        ],
+        "P123": [
+          { "mainsnak": { "datavalue": { "value": { "id": "Q1073068" } } } }
+        ],
+        "P577": [
+          { "mainsnak": { "datavalue": { "value": { "time": "+1965-08-01T00:00:00Z" } } } }
+        ],
+        "P407": [
+          { "mainsnak": { "datavalue": { "value": { "id": "Q1860" } } } }
+        ],
+        "P212": [
+          { "mainsnak": { "datavalue": { "value": "978-0-441-17271-9" } } }
+        ],
+        "P648": [
+          { "mainsnak": { "datavalue": { "value": "OL893415W" } } }
+        ],
+        "P179": [
+          {
+            "mainsnak": { "datavalue": { "value": { "id": "Q837705" } } },
+            "qualifiers": {
+              "P1545": [
+                { "datavalue": { "value": "1" } }
+              ]
+            }
+          }
+        ],
+        "P674": [
+          { "mainsnak": { "datavalue": { "value": { "id": "Q739382" } } } },
+          { "mainsnak": { "datavalue": { "value": { "id": "Q627423" } } } }
+        ],
+        "P840": [
+          { "mainsnak": { "datavalue": { "value": { "id": "Q217126" } } } },
+          { "mainsnak": { "datavalue": { "value": { "id": "Q857511" } } } }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "Q181557": {
+      "id": "Q181557",
+      "labels": {
+        "en": { "language": "en", "value": "Frank Herbert" }
+      }
+    },
+    "Q1073068": {
+      "id": "Q1073068",
+      "labels": {
+        "en": { "language": "en", "value": "Chilton Books" }
+      }
+    },
+    "Q837705": {
+      "id": "Q837705",
+      "labels": {
+        "pt": { "language": "pt", "value": "Dune" },
+        "en": { "language": "en", "value": "Dune" }
+      },
+      "descriptions": {
+        "pt": { "language": "pt", "value": "Série de livros de ficção científica criada por Frank Herbert." }
+      }
+    },
+    "Q739382": {
+      "id": "Q739382",
+      "labels": {
+        "pt": { "language": "pt", "value": "Paul Atreides" },
+        "en": { "language": "en", "value": "Paul Atreides" }
+      },
+      "descriptions": {
+        "pt": { "language": "pt", "value": "Protagonista da série Duna." }
+      },
+      "aliases": {
+        "pt": [{ "language": "pt", "value": "Muad'Dib" }],
+        "en": [{ "language": "en", "value": "Usul" }]
+      }
+    },
+    "Q627423": {
+      "id": "Q627423",
+      "labels": {
+        "pt": { "language": "pt", "value": "Lady Jessica" },
+        "en": { "language": "en", "value": "Lady Jessica" }
+      },
+      "descriptions": {
+        "en": { "language": "en", "value": "Bene Gesserit concubine of Duke Leto Atreides." }
+      }
+    },
+    "Q217126": {
+      "id": "Q217126",
+      "labels": {
+        "pt": { "language": "pt", "value": "Arrakis" },
+        "en": { "language": "en", "value": "Arrakis" }
+      },
+      "descriptions": {
+        "pt": { "language": "pt", "value": "Planeta desértico fictício, fonte da especiaria melange." }
+      },
+      "aliases": {
+        "pt": [{ "language": "pt", "value": "Duna" }]
+      }
+    },
+    "Q857511": {
+      "id": "Q857511",
+      "labels": {
+        "en": { "language": "en", "value": "Caladan" }
+      },
+      "descriptions": {
+        "en": { "language": "en", "value": "Oceanic homeworld of House Atreides." }
+      }
+    }
+  }
+}

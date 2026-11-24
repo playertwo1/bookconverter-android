@@ -25,6 +25,20 @@
                 "description": "Epic science fiction saga spanning thousands of years on Arrakis."
               }
             }
+          ],
+          "book_characters": [
+            {
+              "character": {
+                "name": "Paul Atreides",
+                "biography": "Heir to House Atreides who rises as leader of the Fremen."
+              }
+            },
+            {
+              "character": {
+                "name": "Chani",
+                "biography": "Fremen warrior and partner of Paul Atreides."
+              }
+            }
           ]
         }
       }

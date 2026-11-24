@@ -91,6 +91,9 @@ class HardcoverMetadataProvider(
               position
               series { id name description }
             }
+            book_characters(limit: 20) {
+              character { name biography }
+            }
           }
         }
       }
@@ -133,6 +136,9 @@ class HardcoverMetadataProvider(
                 position
                 series { id name description }
               }
+              book_characters(limit: 20) {
+                character { name biography }
+              }
               editions(limit: 3) {
                 isbn_13
                 isbn_10
@@ -162,6 +168,9 @@ class HardcoverMetadataProvider(
                 position
                 series { id name description }
               }
+              book_characters(limit: 20) {
+                character { name biography }
+              }
               editions(limit: 3) {
                 isbn_13
                 isbn_10
@@ -190,6 +199,9 @@ class HardcoverMetadataProvider(
               book_series {
                 position
                 series { id name description }
+              }
+              book_characters(limit: 20) {
+                character { name biography }
               }
               editions(limit: 3) {
                 isbn_13
@@ -239,6 +251,22 @@ class HardcoverMetadataProvider(
     val seriesPosition = normalizeSeriesPosition(seriesEntry?.get("position")?.jsonPrimitive?.contentOrNull)
     val seriesSummary = trimToBriefSummary(seriesObj?.stringField("description"))
 
+    val characters = book["book_characters"]
+      ?.asJsonArrayOrNull()
+      ?.mapNotNull { entry ->
+        val ch = entry.asJsonObjectOrNull()?.get("character")?.asJsonObjectOrNull() ?: return@mapNotNull null
+        val name = ch.stringField("name") ?: return@mapNotNull null
+        val bio = trimToBriefSummary(ch.stringField("biography"), maxChars = 160)
+        MetadataNamedItem(
+          name = name,
+          description = bio,
+          source = source,
+          fromFreeText = false,
+        )
+      }
+      ?.let { mergeNamedItems(emptyList(), it) }
+      ?: emptyList()
+
     return SourceBookCandidate(
       source = source,
       title = title,
@@ -253,6 +281,7 @@ class HardcoverMetadataProvider(
       seriesSummary = seriesSummary,
       hardcoverId = hardcoverId,
       seriesHardcoverId = seriesId,
+      characters = characters,
     )
   }
 

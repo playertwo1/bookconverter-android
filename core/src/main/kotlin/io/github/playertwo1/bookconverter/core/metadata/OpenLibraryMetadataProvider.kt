@@ -83,8 +83,8 @@ class OpenLibraryMetadataProvider(
       ?.stringField("key")
 
     var summary = extractOpenLibraryText(editionObj["description"])
-    var characters = emptyList<String>()
-    var places = emptyList<String>()
+    var characters = emptyList<MetadataNamedItem>()
+    var places = emptyList<MetadataNamedItem>()
     var authorKey = editionObj["authors"]
       ?.asJsonArrayOrNull()
       ?.firstOrNull()
@@ -98,8 +98,8 @@ class OpenLibraryMetadataProvider(
         if (summary == null) {
           summary = extractOpenLibraryText(workObj["description"])
         }
-        characters = workObj.stringList("subject_people")
-        places = workObj.stringList("subject_places")
+        characters = extractOpenLibraryNamedItems(workObj.stringList("subject_people"), isPerson = true)
+        places = extractOpenLibraryNamedItems(workObj.stringList("subject_places"), isPerson = false)
         if (authorKey == null) {
           authorKey = workObj["authors"]
             ?.asJsonArrayOrNull()
@@ -173,8 +173,8 @@ class OpenLibraryMetadataProvider(
         seriesName = null,
         seriesPosition = null,
         openLibraryKey = doc.stringField("key"),
-        characters = doc.stringList("subject_people"),
-        places = doc.stringList("subject_places"),
+        characters = extractOpenLibraryNamedItems(doc.stringList("subject_people"), isPerson = true),
+        places = extractOpenLibraryNamedItems(doc.stringList("subject_places"), isPerson = false),
       )
     }
   }
@@ -207,6 +207,20 @@ class OpenLibraryMetadataProvider(
     private const val MAX_RESULTS = 6
   }
 }
+
+private fun extractOpenLibraryNamedItems(rawTags: List<String>, isPerson: Boolean): List<MetadataNamedItem> {
+  val items = rawTags.mapNotNull { raw ->
+    val cleaned = normalizeOpenLibraryFreeTextEntity(raw, isPerson = isPerson) ?: return@mapNotNull null
+    MetadataNamedItem(
+      name = cleaned,
+      source = MetadataSource.OPEN_LIBRARY,
+      fromFreeText = true,
+    )
+  }
+  return mergeNamedItems(emptyList(), items).take(MAX_NAMED_ITEMS)
+}
+
+private const val MAX_NAMED_ITEMS = 25
 
 private fun extractOpenLibraryText(element: JsonElement?): String? {
   if (element == null) return null

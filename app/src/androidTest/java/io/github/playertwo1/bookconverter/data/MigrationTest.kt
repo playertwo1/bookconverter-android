@@ -806,6 +806,8 @@ class MigrationTest {
             assertEquals(3, existingSeries?.glossaryVersion)
             assertEquals(null, existingSeries?.summary)
             assertEquals(null, existingSeries?.wikidataQid)
+            assertEquals(null, existingSeries?.charactersJson)
+            assertEquals(null, existingSeries?.locationsJson)
 
             val existingBook = db.books().byId(1)
             assertNotNull(existingBook)
@@ -814,6 +816,8 @@ class MigrationTest {
             assertEquals(null, existingBook?.isbn)
             assertEquals(null, existingBook?.seriesPosition)
             assertEquals(null, existingBook?.metadataSourcesJson)
+            assertEquals(null, existingBook?.charactersJson)
+            assertEquals(null, existingBook?.locationsJson)
 
             val glossary = db.series().glossaryForSeries(1)
             assertEquals(1, glossary.size)
@@ -823,6 +827,9 @@ class MigrationTest {
             assertNotNull(job)
             assertEquals(1L, job?.seriesId)
             assertEquals("Tom solene", job?.styleNotesSnapshot)
+
+            val sampleCharsJson = """[{"name":"Paul Atreides","description":"Protagonista","source":"WIKIDATA","fromFreeText":false}]"""
+            val sampleLocsJson = """[{"name":"Arrakis","aliases":["Duna"],"source":"WIKIDATA","fromFreeText":false}]"""
 
             // Updating book & series metadata persists all new fields
             db.books().updateBook(
@@ -836,6 +843,8 @@ class MigrationTest {
                     wikidataQid = "Q190192",
                     hardcoverId = "42",
                     metadataSourcesJson = """{"isbn":"OPEN_LIBRARY","seriesPosition":"WIKIDATA"}""",
+                    charactersJson = sampleCharsJson,
+                    locationsJson = sampleLocsJson,
                 )
             )
             db.series().updateSeries(
@@ -844,6 +853,8 @@ class MigrationTest {
                     wikidataQid = "Q837705",
                     hardcoverId = "7",
                     metadataSourcesJson = """{"summary":"WIKIDATA"}""",
+                    charactersJson = sampleCharsJson,
+                    locationsJson = sampleLocsJson,
                 )
             )
 
@@ -855,11 +866,15 @@ class MigrationTest {
             assertEquals("/works/OL893415W", updatedBook?.openLibraryKey)
             assertEquals("Q190192", updatedBook?.wikidataQid)
             assertEquals("42", updatedBook?.hardcoverId)
+            assertEquals(sampleCharsJson, updatedBook?.charactersJson)
+            assertEquals(sampleLocsJson, updatedBook?.locationsJson)
 
             val updatedSeries = db.series().byId(1)
             assertEquals("Q837705", updatedSeries?.wikidataQid)
             assertEquals("7", updatedSeries?.hardcoverId)
             assertEquals("""{"summary":"WIKIDATA"}""", updatedSeries?.metadataSourcesJson)
+            assertEquals(sampleCharsJson, updatedSeries?.charactersJson)
+            assertEquals(sampleLocsJson, updatedSeries?.locationsJson)
         }
         db.close()
     }

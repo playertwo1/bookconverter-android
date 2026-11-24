@@ -13,14 +13,16 @@ import java.net.SocketTimeoutException
 import java.util.Locale
 
 /**
- * Wikidata metadata client using MediaWiki API search for fast QID lookup followed by a lightweight
- * VALUES-scoped SPARQL query (avoids full-graph text-search timeouts).
+ * Wikidata metadata client using MediaWiki API search + wbgetentities (no key required).
+ * Fetches structured book/series fields, series position (P179 + qualifier P1545),
+ * characters (P674) and narrative locations (P840) with labels, short descriptions and aliases
+ * without triggering SPARQL Cartesian-product timeouts.
  * Respects HTTP 429 with Retry-After and sends a descriptive app User-Agent without personal data.
  */
 class WikidataMetadataProvider(
   private val appVersion: String = "1.0",
   private val apiBaseUrl: String = DEFAULT_API_BASE_URL,
-  private val sparqlBaseUrl: String = DEFAULT_SPARQL_BASE_URL,
+  @Suppress("unused") private val sparqlBaseUrl: String = DEFAULT_SPARQL_BASE_URL,
   private val client: OkHttpClient = defaultMetadataHttpClient(timeoutSeconds = 15L),
   private val rateLimiter: MetadataRateLimiter = MetadataRateLimiter(minIntervalMs = 1000L),
   private val retrySleepFn: suspend (Long) -> Unit = { delay(it) },
@@ -104,124 +106,146 @@ class WikidataMetadataProvider(
       ?: emptyList()
   }
 
-  private suspend fun fetchByQids(qids: List<String>, query: BookMetadataQuery): List<SourceBookCandidate> {
-    val valuesClause = qids.joinToString(" ") { "wd:$it" }
-    // Keep SPARQL lightweight (no P674/P840 Cartesian product) so Wikidata responds well within timeout.
-    val sparql = """
-      SELECT DISTINCT ?item ?work ?workLabel ?workDescPt ?workDescEn ?authorLabel ?publisherLabel ?pubDate ?langCode ?isbn13 ?isbn10 ?series ?seriesLabel ?seriesDescPt ?seriesDescEn ?seriesOrdinal ?olId WHERE {
-        VALUES ?item { $valuesClause }
-        OPTIONAL { ?item wdt:P629 ?linkedWork . }
-        BIND(COALESCE(?linkedWork, ?item) AS ?work)
-        OPTIONAL { ?work wdt:P50 ?author . }
-        OPTIONAL { ?item wdt:P123 ?edPublisher . }
-        OPTIONAL { ?work wdt:P123 ?workPublisher . }
-        BIND(COALESCE(?edPublisher, ?workPublisher) AS ?publisher)
-        OPTIONAL { ?item wdt:P577 ?edDate . }
-        OPTIONAL { ?work wdt:P577 ?workDate . }
-        BIND(COALESCE(?edDate, ?workDate) AS ?pubDate)
-        OPTIONAL { ?work wdt:P407 ?lang . OPTIONAL { ?lang wdt:P218 ?langCode . } }
-        OPTIONAL { ?item wdt:P212 ?isbn13 . }
-        OPTIONAL { ?item wdt:P957 ?isbn10 . }
-        OPTIONAL {
-          ?work p:P179 ?seriesStmt .
-          ?seriesStmt ps:P179 ?series .
-          OPTIONAL { ?seriesStmt pq:P1545 ?seriesOrdinal . }
-          OPTIONAL { ?series schema:description ?seriesDescPt . FILTER(LANG(?seriesDescPt) = "pt") }
-          OPTIONAL { ?series schema:description ?seriesDescEn . FILTER(LANG(?seriesDescEn) = "en") }
-        }
-        OPTIONAL { ?work wdt:P648 ?olId . }
-        OPTIONAL { ?work schema:description ?workDescPt . FILTER(LANG(?workDescPt) = "pt") }
-        OPTIONAL { ?work schema:description ?workDescEn . FILTER(LANG(?workDescEn) = "en") }
-        SERVICE wikibase:label { bd:serviceParam wikibase:language "pt,en". }
+  private suspend fun fetchEntities(ids: List<String>, includeClaims: Boolean): Map<String, JsonObject> {
+    val distinct = ids.distinct().filter(QID_REGEX::matches)
+    if (distinct.isEmpty()) return emptyMap()
+    val out = linkedMapOf<String, JsonObject>()
+    val props = if (includeClaims) "labels|descriptions|aliases|claims" else "labels|descriptions|aliases"
+    for (chunk in distinct.chunked(MAX_BATCH_IDS)) {
+      val url = "${apiBaseUrl.trimEnd('/')}/w/api.php".toHttpUrl().newBuilder()
+        .addQueryParameter("action", "wbgetentities")
+        .addQueryParameter("ids", chunk.joinToString("|"))
+        .addQueryParameter("props", props)
+        .addQueryParameter("languages", "pt|en")
+        .addQueryParameter("format", "json")
+        .build()
+        .toString()
+      val root = getJsonWithRetry(url)
+      val entities = root["entities"]?.asJsonObjectOrNull() ?: continue
+      for ((key, value) in entities) {
+        val obj = value.asJsonObjectOrNull() ?: continue
+        if (obj.containsKey("missing")) continue
+        out[key] = obj
       }
-      LIMIT 30
-    """.trimIndent()
+    }
+    return out
+  }
 
-    val url = "${sparqlBaseUrl.trimEnd('/')}/sparql".toHttpUrl().newBuilder()
-      .addQueryParameter("format", "json")
-      .addQueryParameter("query", sparql)
-      .build()
-      .toString()
+  private suspend fun fetchByQids(qids: List<String>, query: BookMetadataQuery): List<SourceBookCandidate> {
+    val primaryEntities = fetchEntities(qids, includeClaims = true).toMutableMap()
+    if (primaryEntities.isEmpty()) return emptyList()
 
-    val root = getJsonWithRetry(url, acceptHeader = "application/sparql-results+json")
-    val bindings = root["results"]
-      ?.asJsonObjectOrNull()
-      ?.get("bindings")
-      ?.asJsonArrayOrNull()
-      ?: return emptyList()
-
-    data class Accumulator(
-      val qid: String,
-      var title: String? = null,
-      val authors: LinkedHashSet<String> = linkedSetOf(),
-      var isbn13: String? = null,
-      var isbn10: String? = null,
-      var publisher: String? = null,
-      var publishedDate: String? = null,
-      var language: String? = null,
-      var descPt: String? = null,
-      var descEn: String? = null,
-      var seriesQid: String? = null,
-      var seriesName: String? = null,
-      var seriesPosition: String? = null,
-      var seriesDescPt: String? = null,
-      var seriesDescEn: String? = null,
-      var olId: String? = null,
-      val characters: LinkedHashSet<String> = linkedSetOf(),
-      val places: LinkedHashSet<String> = linkedSetOf(),
-    )
-
-    val byWorkQid = linkedMapOf<String, Accumulator>()
-    for (el in bindings) {
-      val row = el.asJsonObjectOrNull() ?: continue
-      val workUri = row.bindingValue("work") ?: row.bindingValue("item") ?: continue
-      val qid = extractQid(workUri) ?: continue
-      val acc = byWorkQid.getOrPut(qid) { Accumulator(qid) }
-
-      val label = row.bindingValue("workLabel")?.takeUnless { QID_REGEX.matches(it) }
-      if (acc.title == null && label != null) acc.title = label
-      row.bindingValue("authorLabel")?.takeUnless { QID_REGEX.matches(it) }?.let { acc.authors += it }
-      if (acc.isbn13 == null) acc.isbn13 = normalizeIsbn(row.bindingValue("isbn13"))
-      if (acc.isbn10 == null) acc.isbn10 = normalizeIsbn(row.bindingValue("isbn10"))
-      if (acc.publisher == null) acc.publisher = row.bindingValue("publisherLabel")?.takeUnless { QID_REGEX.matches(it) }
-      if (acc.publishedDate == null) acc.publishedDate = parseWikidataYearOrDate(row.bindingValue("pubDate"))
-      if (acc.language == null) acc.language = row.bindingValue("langCode")?.lowercase(Locale.ROOT)
-      if (acc.descPt == null) acc.descPt = row.bindingValue("workDescPt")
-      if (acc.descEn == null) acc.descEn = row.bindingValue("workDescEn")
-      if (acc.seriesQid == null) acc.seriesQid = extractQid(row.bindingValue("series"))
-      if (acc.seriesName == null) acc.seriesName = row.bindingValue("seriesLabel")?.takeUnless { QID_REGEX.matches(it) }
-      if (acc.seriesPosition == null) acc.seriesPosition = normalizeSeriesPosition(row.bindingValue("seriesOrdinal"))
-      if (acc.seriesDescPt == null) acc.seriesDescPt = row.bindingValue("seriesDescPt")
-      if (acc.seriesDescEn == null) acc.seriesDescEn = row.bindingValue("seriesDescEn")
-      if (acc.olId == null) acc.olId = normalizeOpenLibraryIdFromWikidata(row.bindingValue("olId"))
-      row.bindingValue("characterLabel")?.takeUnless { QID_REGEX.matches(it) }?.let { acc.characters += it }
-      row.bindingValue("placeLabel")?.takeUnless { QID_REGEX.matches(it) }?.let { acc.places += it }
+    // If a matched QID is a specific edition with P629 (edition or translation of), also load its work entity
+    val linkedWorkQids = primaryEntities.values
+      .mapNotNull { it.claimEntityIds("P629").firstOrNull() }
+      .filter { it !in primaryEntities }
+      .distinct()
+    if (linkedWorkQids.isNotEmpty()) {
+      primaryEntities.putAll(fetchEntities(linkedWorkQids, includeClaims = true))
     }
 
+    // Collect referenced QIDs (authors, publishers, series, characters P674, narrative locations P840)
+    val refQids = linkedSetOf<String>()
+    val workPairs = linkedMapOf<String, Pair<JsonObject, JsonObject>>() // workQid -> (editionOrItem, work)
+    for (qid in qids) {
+      val itemEntity = primaryEntities[qid] ?: continue
+      val workQid = itemEntity.claimEntityIds("P629").firstOrNull() ?: qid
+      val workEntity = primaryEntities[workQid] ?: itemEntity
+      val instanceOf = workEntity.claimEntityIds("P31") + itemEntity.claimEntityIds("P31")
+      if (instanceOf.any { it in EXCLUDED_NON_BOOK_P31 }) continue
+      workPairs.putIfAbsent(workQid, itemEntity to workEntity)
+
+      workEntity.claimEntityIds("P50").firstOrNull()?.let { refQids += it }
+      (itemEntity.claimEntityIds("P123").firstOrNull() ?: workEntity.claimEntityIds("P123").firstOrNull())?.let { refQids += it }
+      workEntity.claimSeriesWithOrdinal()?.first?.let { refQids += it }
+      workEntity.claimEntityIds("P674").take(MAX_NAMED_ITEMS_PER_KIND).forEach { refQids += it }
+      workEntity.claimEntityIds("P840").take(MAX_NAMED_ITEMS_PER_KIND).forEach { refQids += it }
+    }
+
+    val missingRefs = refQids.filter { it !in primaryEntities }
+    val resolvedRefs = if (missingRefs.isNotEmpty()) {
+      fetchEntities(missingRefs, includeClaims = false)
+    } else {
+      emptyMap()
+    }
+    val allEntities = primaryEntities + resolvedRefs
+
     val authorFilter = query.cleanAuthor?.lowercase(Locale.ROOT)
-    val built = byWorkQid.values.mapNotNull { acc ->
-      // Keep only literary-like entities that carry a title plus at least one bibliographic signal
-      val title = acc.title ?: return@mapNotNull null
-      val hasBookSignal = acc.authors.isNotEmpty() || acc.isbn13 != null || acc.isbn10 != null ||
-        acc.seriesName != null || acc.olId != null || acc.publisher != null
-      if (!hasBookSignal) return@mapNotNull null
+    val built = workPairs.entries.mapNotNull { (workQid, pair) ->
+      val (itemEntity, workEntity) = pair
+      val instanceOf = (workEntity.claimEntityIds("P31") + itemEntity.claimEntityIds("P31")).toSet()
+
+      val labels = workEntity["labels"]?.asJsonObjectOrNull() ?: itemEntity["labels"]?.asJsonObjectOrNull()
+      val ptTitle = labels?.get("pt")?.asJsonObjectOrNull()?.stringField("value")
+      val enTitle = labels?.get("en")?.asJsonObjectOrNull()?.stringField("value")
+      val title = ptTitle ?: enTitle ?: return@mapNotNull null
+      val alternateTitle = enTitle?.takeIf { !it.equals(title, ignoreCase = true) }
+
+      val authorQid = workEntity.claimEntityIds("P50").firstOrNull()
+      val author = authorQid?.let { allEntities[it]?.preferredLabel() }
+
+      val publisherQid = itemEntity.claimEntityIds("P123").firstOrNull() ?: workEntity.claimEntityIds("P123").firstOrNull()
+      val publisher = publisherQid?.let { allEntities[it]?.preferredLabel() }
+
+      val publishedDate = parseWikidataYearOrDate(
+        itemEntity.claimTimeStrings("P577").firstOrNull()
+          ?: workEntity.claimTimeStrings("P577").firstOrNull()
+      )
+
+      val langQid = workEntity.claimEntityIds("P407").firstOrNull()
+        ?: itemEntity.claimEntityIds("P407").firstOrNull()
+      val language = langQid?.let(::mapWikidataLanguageQid)
+
+      val isbn13 = normalizeIsbn(itemEntity.claimStrings("P212").firstOrNull() ?: workEntity.claimStrings("P212").firstOrNull())
+      val isbn10 = normalizeIsbn(itemEntity.claimStrings("P957").firstOrNull() ?: workEntity.claimStrings("P957").firstOrNull())
+      val isbn = isbn13 ?: isbn10
+
+      val olId = normalizeOpenLibraryIdFromWikidata(
+        workEntity.claimStrings("P648").firstOrNull() ?: itemEntity.claimStrings("P648").firstOrNull()
+      )
+
+      val seriesPair = workEntity.claimSeriesWithOrdinal()
+      val seriesQid = seriesPair?.first
+      val seriesEntity = seriesQid?.let { allEntities[it] }
+      val seriesName = seriesEntity?.preferredLabel()
+      val seriesPosition = normalizeSeriesPosition(seriesPair?.second)
+      val seriesSummary = trimToBriefSummary(
+        seriesEntity?.preferredDescription()?.takeUnless { it.contains("Wikimedia", ignoreCase = true) }
+      )
+
+      val characters = workEntity.claimEntityIds("P674")
+        .take(MAX_NAMED_ITEMS_PER_KIND)
+        .mapNotNull { qid -> allEntities[qid]?.toWikidataNamedItem() }
+      val places = workEntity.claimEntityIds("P840")
+        .take(MAX_NAMED_ITEMS_PER_KIND)
+        .mapNotNull { qid -> allEntities[qid]?.toWikidataNamedItem() }
+
+      // Keep only literary works/books carrying an author, ISBN, Open Library ID, or literary P31
+      val hasLiterarySignal = author != null || isbn != null || olId != null ||
+        instanceOf.any { it in LITERARY_P31 }
+      if (!hasLiterarySignal) return@mapNotNull null
+
       SourceBookCandidate(
         source = source,
         title = title,
-        author = acc.authors.firstOrNull(),
-        isbn = acc.isbn13 ?: acc.isbn10,
-        publisher = acc.publisher,
-        publishedDate = acc.publishedDate,
-        language = acc.language,
-        summary = trimToBriefSummary(acc.descPt ?: acc.descEn),
-        seriesName = acc.seriesName,
-        seriesPosition = acc.seriesPosition,
-        seriesSummary = trimToBriefSummary(acc.seriesDescPt ?: acc.seriesDescEn),
-        openLibraryKey = acc.olId,
-        wikidataQid = acc.qid,
-        seriesWikidataQid = acc.seriesQid,
-        characters = acc.characters.toList(),
-        places = acc.places.toList(),
+        alternateTitle = alternateTitle,
+        author = author,
+        isbn = isbn,
+        publisher = publisher,
+        publishedDate = publishedDate,
+        language = language,
+        summary = trimToBriefSummary(
+          (workEntity.preferredDescription() ?: itemEntity.preferredDescription())
+            ?.takeUnless { it.contains("Wikimedia", ignoreCase = true) }
+        ),
+        seriesName = seriesName,
+        seriesPosition = seriesPosition,
+        seriesSummary = seriesSummary,
+        openLibraryKey = olId,
+        wikidataQid = workQid,
+        seriesWikidataQid = seriesQid,
+        characters = mergeNamedItems(emptyList(), characters),
+        places = mergeNamedItems(emptyList(), places),
       )
     }
 
@@ -268,24 +292,158 @@ class WikidataMetadataProvider(
     const val DEFAULT_API_BASE_URL = "https://www.wikidata.org"
     const val DEFAULT_SPARQL_BASE_URL = "https://query.wikidata.org"
     private const val MAX_QIDS = 4
+    private const val MAX_BATCH_IDS = 45
+    private const val MAX_NAMED_ITEMS_PER_KIND = 20
     private val QID_REGEX = Regex("^Q\\d+$")
+    private val EXCLUDED_NON_BOOK_P31 = setOf(
+      "Q7889",     // video game
+      "Q11424",    // film
+      "Q5398426",  // television series
+      "Q13406463", // Wikimedia list article
+      "Q4167410",  // Wikimedia disambiguation page
+      "Q482994",   // album
+      "Q7366",     // song
+    )
+    private val LITERARY_P31 = setOf(
+      "Q7725634",  // literary work
+      "Q571",      // book
+      "Q8261",     // novel
+      "Q47461344", // written work
+      "Q3331189",  // version, edition, or translation
+      "Q49084",    // short story
+      "Q1667921",  // novel series
+      "Q277759",   // book series
+    )
   }
 }
 
-private fun JsonObject.bindingValue(key: String): String? =
-  this[key]?.asJsonObjectOrNull()?.stringField("value")
+private fun JsonObject.preferredLabel(): String? {
+  val labels = this["labels"]?.asJsonObjectOrNull() ?: return null
+  return labels["pt"]?.asJsonObjectOrNull()?.stringField("value")
+    ?: labels["en"]?.asJsonObjectOrNull()?.stringField("value")
+}
 
-private fun extractQid(uriOrId: String?): String? {
-  val raw = uriOrId?.trim()?.substringAfterLast('/') ?: return null
-  return raw.takeIf { it.startsWith("Q") && it.length > 1 && it.drop(1).all(Char::isDigit) }
+private fun JsonObject.preferredDescription(): String? {
+  val descriptions = this["descriptions"]?.asJsonObjectOrNull() ?: return null
+  return descriptions["pt"]?.asJsonObjectOrNull()?.stringField("value")
+    ?: descriptions["en"]?.asJsonObjectOrNull()?.stringField("value")
+}
+
+private fun JsonObject.toWikidataNamedItem(): MetadataNamedItem? {
+  val labels = this["labels"]?.asJsonObjectOrNull() ?: return null
+  val ptLabel = labels["pt"]?.asJsonObjectOrNull()?.stringField("value")
+  val enLabel = labels["en"]?.asJsonObjectOrNull()?.stringField("value")
+  val primaryName = ptLabel ?: enLabel ?: return null
+  val primaryKey = normalizeEntityComparisonKey(primaryName)
+
+  val aliasPool = mutableListOf<String>()
+  // Preserve English canonical name as alias when Portuguese label differs
+  if (ptLabel != null && enLabel != null && normalizeEntityComparisonKey(enLabel) != primaryKey) {
+    aliasPool += enLabel
+  }
+  val aliasesObj = this["aliases"]?.asJsonObjectOrNull()
+  listOf("pt", "en").forEach { lang ->
+    aliasesObj?.get(lang)?.asJsonArrayOrNull()?.forEach { entry ->
+      entry.asJsonObjectOrNull()?.stringField("value")?.let { alias ->
+        if (normalizeEntityComparisonKey(alias) != primaryKey) {
+          aliasPool += alias
+        }
+      }
+    }
+  }
+  val distinctAliases = aliasPool.distinctBy(::normalizeEntityComparisonKey).take(3)
+
+  return MetadataNamedItem(
+    name = primaryName,
+    description = trimToBriefSummary(preferredDescription(), maxChars = 160),
+    aliases = distinctAliases,
+    source = MetadataSource.WIKIDATA,
+    fromFreeText = false,
+  )
+}
+
+private fun JsonObject.claimStatements(propertyId: String): List<JsonObject> =
+  this["claims"]
+    ?.asJsonObjectOrNull()
+    ?.get(propertyId)
+    ?.asJsonArrayOrNull()
+    ?.mapNotNull { it.asJsonObjectOrNull() }
+    ?.filter { it.stringField("rank") != "deprecated" }
+    ?: emptyList()
+
+private fun JsonObject.claimEntityIds(propertyId: String): List<String> =
+  claimStatements(propertyId).mapNotNull { stmt ->
+    stmt["mainsnak"]
+      ?.asJsonObjectOrNull()
+      ?.get("datavalue")
+      ?.asJsonObjectOrNull()
+      ?.get("value")
+      ?.asJsonObjectOrNull()
+      ?.stringField("id")
+  }.distinct()
+
+private fun JsonObject.claimStrings(propertyId: String): List<String> =
+  claimStatements(propertyId).mapNotNull { stmt ->
+    stmt["mainsnak"]
+      ?.asJsonObjectOrNull()
+      ?.get("datavalue")
+      ?.asJsonObjectOrNull()
+      ?.stringField("value")
+  }.distinct()
+
+private fun JsonObject.claimTimeStrings(propertyId: String): List<String> =
+  claimStatements(propertyId).mapNotNull { stmt ->
+    stmt["mainsnak"]
+      ?.asJsonObjectOrNull()
+      ?.get("datavalue")
+      ?.asJsonObjectOrNull()
+      ?.get("value")
+      ?.asJsonObjectOrNull()
+      ?.stringField("time")
+  }.distinct()
+
+private fun JsonObject.claimSeriesWithOrdinal(): Pair<String, String?>? {
+  for (stmt in claimStatements("P179")) {
+    val seriesQid = stmt["mainsnak"]
+      ?.asJsonObjectOrNull()
+      ?.get("datavalue")
+      ?.asJsonObjectOrNull()
+      ?.get("value")
+      ?.asJsonObjectOrNull()
+      ?.stringField("id")
+      ?: continue
+    val ordinal = stmt["qualifiers"]
+      ?.asJsonObjectOrNull()
+      ?.get("P1545")
+      ?.asJsonArrayOrNull()
+      ?.firstOrNull()
+      ?.asJsonObjectOrNull()
+      ?.get("datavalue")
+      ?.asJsonObjectOrNull()
+      ?.stringField("value")
+    return seriesQid to ordinal
+  }
+  return null
+}
+
+private fun mapWikidataLanguageQid(qid: String): String? = when (qid) {
+  "Q1860" -> "en"
+  "Q5146" -> "pt"
+  "Q1321" -> "es"
+  "Q150" -> "fr"
+  "Q188" -> "de"
+  "Q652" -> "it"
+  "Q5287" -> "ja"
+  "Q7737" -> "ru"
+  else -> null
 }
 
 private fun parseWikidataYearOrDate(raw: String?): String? {
-  val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+  val trimmed = raw?.trim()?.removePrefix("+")?.takeIf { it.isNotEmpty() } ?: return null
   val datePart = trimmed.substringBefore('T')
   val year = datePart.take(4)
   return if (year.length == 4 && year.all(Char::isDigit)) {
-    if (datePart.endsWith("-01-01")) year else datePart
+    if (datePart.endsWith("-01-01") || datePart.endsWith("-00-00")) year else datePart
   } else {
     trimmed
   }
