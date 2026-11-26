@@ -41,6 +41,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -393,6 +394,7 @@ fun NewTranslationScreen(
                     estimate = pv.estimate,
                     budget = state.budget,
                     overBudget = state.overBudget,
+                    batchMode = state.batchMode,
                     onBudget = vm::setBudget,
                 )
             }
@@ -404,6 +406,31 @@ fun NewTranslationScreen(
                     fontSize = 13.sp,
                     modifier = Modifier.padding(top = 12.dp)
                 )
+            }
+
+            if (state.batchCeilingConflict) {
+                Card(Modifier.padding(top = 12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "O modo econômico (Batch) envia todos os blocos de uma vez e não consegue parar no teto de ${count(state.budget.toLong())} tokens.",
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                        )
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = { vm.setUseBatchMode(false) },
+                                modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp),
+                            ) { Text("Modo normal com teto", fontSize = 13.sp) }
+                            OutlinedButton(
+                                onClick = vm::confirmBatchWithoutCeiling,
+                                modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp),
+                            ) { Text("Batch sem teto", fontSize = 13.sp) }
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -572,6 +599,7 @@ private fun PreviewDone(
     estimate: Estimate?,
     budget: String,
     overBudget: Boolean,
+    batchMode: Boolean,
     onBudget: (String) -> Unit,
 ) {
     if (result.effortRejected) {
@@ -667,7 +695,15 @@ private fun PreviewDone(
         value = budget,
         onValueChange = onBudget,
         label = { Text("Teto de tokens") },
-        supportingText = { Text("A tradução para quando atingir o teto.") },
+        supportingText = {
+            Text(
+                if (batchMode) {
+                    "O modo econômico (Batch) não aplica o teto."
+                } else {
+                    "Confere o teto entre blocos: o último bloco iniciado pode passar um pouco dele."
+                },
+            )
+        },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         singleLine = true,
         colors = fieldColors(),

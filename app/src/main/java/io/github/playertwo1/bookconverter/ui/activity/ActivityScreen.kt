@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.playertwo1.bookconverter.worker.TranslationWorker
 import io.github.playertwo1.bookconverter.data.JobStatus
 import io.github.playertwo1.bookconverter.data.JobWithBook
 import io.github.playertwo1.bookconverter.ui.count
@@ -319,7 +320,11 @@ private fun ActiveJobCard(
                     Spacer(Modifier.height(12.dp))
                     val budget = job.tokenBudget ?: 0L
                     AlertBanner(
-                        message = "O teto de ${count(budget)} tokens foi atingido. Seu progresso foi salvo com segurança. Você pode continuar sem limite de orçamento ou cancelar.",
+                        message = if (job.executionMode == "BATCH" && job.remoteBatchId == null) {
+                            "Nada foi enviado. " + TranslationWorker.BATCH_CEILING_REASON
+                        } else {
+                            "O teto de ${count(budget)} tokens foi atingido. Seu progresso foi salvo com segurança. Você pode continuar sem limite de orçamento ou cancelar."
+                        },
                         isWarning = false,
                     )
                 }
