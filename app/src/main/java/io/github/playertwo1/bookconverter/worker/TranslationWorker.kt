@@ -326,6 +326,11 @@ class TranslationWorker(
         db: AppDatabase = AppDatabase.get(applicationContext),
     ): BatchRunResult {
         val now = System.currentTimeMillis()
+        if (batchCeilingBlocks(job)) {
+            // Stop before any provider call; "Continuar sem teto" in Activity clears the ceiling.
+            dao.updateJobStatus(job.id, JobStatus.PAUSED_BUDGET, BATCH_CEILING_REASON, now)
+            return BatchRunResult.DONE
+        }
         val provider = try {
             Provider.valueOf(job.provider)
         } catch (e: IllegalArgumentException) {
@@ -691,5 +696,11 @@ class TranslationWorker(
         const val CHANNEL_ID = "translation_jobs"
         const val NOTIFICATION_ID = 4001
         private const val TAG = "TranslationWorker"
+        const val BATCH_CEILING_REASON =
+            "O modo econômico (Batch) não aplica teto de tokens. Continue sem teto ou cancele e crie de novo no modo normal para manter o teto."
+
+        /** A new Batch (no remote id yet) with a positive ceiling would send the whole book unchecked. */
+        fun batchCeilingBlocks(job: TranslationJob): Boolean =
+            job.remoteBatchId == null && (job.tokenBudget ?: 0L) > 0L
     }
 }

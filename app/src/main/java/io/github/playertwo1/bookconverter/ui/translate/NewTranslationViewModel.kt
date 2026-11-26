@@ -77,6 +77,8 @@ data class NewTranslationState(
     val selectedSeriesId: Long? = null,
     val seriesSelectionInitialized: Boolean = false,
     val useBatchMode: Boolean = false,
+    /** Ceiling the user expressly chose to send in Batch without; null = not confirmed. */
+    val batchWithoutCeilingFor: String? = null,
 ) {
     val supportsBatch: Boolean
         get() = when (provider) {
@@ -88,7 +90,11 @@ data class NewTranslationState(
     val sample: Chunk? get() = chunks?.let { if (it.isEmpty()) null else sampleChunk(it) }
     val bookChars: Int get() = chunks?.sumOf { it.htmlChars } ?: 0
     val canPreview: Boolean get() = provider != null && model != null && sample != null && preview != PreviewState.Running
-    val canStart: Boolean get() = provider != null && model != null && !chunks.isNullOrEmpty() && preview != PreviewState.Running && !starting
+    val canStart: Boolean get() = provider != null && model != null && !chunks.isNullOrEmpty() && preview != PreviewState.Running && !starting && !batchCeilingConflict
+    val batchMode: Boolean get() = useBatchMode && supportsBatch
+    /** Batch sends every pending block at once and cannot stop at the ceiling: the user must choose. */
+    val batchCeilingConflict: Boolean
+        get() = batchMode && (budget.toLongOrNull() ?: 0L) > 0L && batchWithoutCeilingFor != budget
     /** Upper estimate above the ceiling: the screen warns before the user starts. */
     val overBudget: Boolean
         get() {
@@ -219,6 +225,9 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
         _state.update { it.copy(useBatchMode = enabled) }
     }
 
+    /** Keeps the typed ceiling on screen; the Batch job is created without it. */
+    fun confirmBatchWithoutCeiling() = _state.update { it.copy(batchWithoutCeilingFor = it.budget) }
+
     fun setBudget(text: String) = _state.update { it.copy(budget = text.filter(Char::isDigit).take(12)) }
 
     /** Asks for consent the first time a provider would receive book text; otherwise sends the sample. */
@@ -287,7 +296,7 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
         val chunks = s.chunks ?: return
         val provider = s.provider ?: return
         val model = s.model ?: return
-        if (s.starting) return
+        if (s.starting || s.batchCeilingConflict) return
 
         _state.update { it.copy(starting = true, startError = null) }
         viewModelScope.launch {
@@ -295,7 +304,8 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
                 withContext(Dispatchers.IO) {
                     val db = AppDatabase.get(getApplication())
                     val now = System.currentTimeMillis()
-                    val tokenBudget = s.budget.toLongOrNull()?.takeIf { it > 0 }
+                    // Batch cannot apply a ceiling; it only gets here after "Batch sem teto".
+                    val tokenBudget = if (s.batchMode) null else s.budget.toLongOrNull()?.takeIf { it > 0 }
 
                     val selectedSeriesId = s.selectedSeriesId
                     val series = selectedSeriesId?.let { db.series().byId(it) }
@@ -338,7 +348,7 @@ class NewTranslationViewModel(app: Application, private val bookId: Long) : Andr
                         glossaryVersion = glossaryVersion,
                         glossarySnapshot = glossarySnapshot,
                         styleNotesSnapshot = styleNotesSnapshot,
-                        executionMode = if (s.useBatchMode && s.supportsBatch) "BATCH" else "SYNC",
+                        executionMode = if (s.batchMode) "BATCH" else "SYNC",
                     )
 
                     val chunkEntities = chunks.mapIndexed { index, chunk ->
